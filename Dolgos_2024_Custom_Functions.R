@@ -1,7 +1,6 @@
 # Load needed files from previous experiment 
-get_exp_file_path = function(organ, project, samples_ID, prev_exp, pattern, last = T){
+get_exp_file_path = function(root <- "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects", organ, project, samples_ID, prev_exp, pattern, last = T){
   
-  root <- "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects"
   sample_dir <- paste0(root, "/", organ, "/", project, "/exp/", samples_ID, "/")
   prev_exp_dir <- paste0(sample_dir, prev_exp)
   
@@ -26,9 +25,8 @@ get_exp_file_path = function(organ, project, samples_ID, prev_exp, pattern, last
 }
 
 ## Create output path in exp folder
-create_exp_folder <- function(organ, project, samples_ID, exp) {
+create_exp_folder <- function(  root <- "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/", organ, project, samples_ID, exp) {
   
-  root <- "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/"
   sample_dir <- paste0(root, "/", organ, "/", project, "/exp/", samples_ID, "/")
   exp_dir <- paste0(sample_dir, exp, "/")
   
