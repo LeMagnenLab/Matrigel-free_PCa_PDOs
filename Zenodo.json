@@ -1,0 +1,1507 @@
+{
+  "access": {
+    "embargo": {
+      "active": true,
+      "reason": "Paper submitted, but not reviewed yet.",
+      "until": "2025-10-18"
+    },
+    "files": "restricted",
+    "record": "public",
+    "status": "embargoed"
+  },
+  "created": "2025-05-27T09:34:44.434215+00:00",
+  "custom_fields": {
+    "code:developmentStatus": {
+      "id": "inactive",
+      "title": {
+        "en": "Inactive"
+      }
+    },
+    "code:programmingLanguage": [
+      {
+        "id": "r",
+        "title": {
+          "en": "R"
+        }
+      }
+    ]
+  },
+  "deletion_status": {
+    "is_deleted": false,
+    "status": "P"
+  },
+  "files": {
+    "count": 60,
+    "enabled": true,
+    "entries": {
+      "Atlas_PCa_PDOs_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:6a6b3eb6ceaf6a34e2526a085a061778",
+        "ext": "tsv",
+        "id": "41ecb1f3-72f4-483d-9620-113d3f07cda3",
+        "key": "Atlas_PCa_PDOs_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 3575522,
+        "storage_class": "L"
+      },
+      "Atlas_PCa_PDOs_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:5b44147e6b66534237c5b8ba517e4b42",
+        "ext": "tsv",
+        "id": "ff38d6cf-972b-4985-b518-aaaccf46f363",
+        "key": "Atlas_PCa_PDOs_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 77609,
+        "storage_class": "L"
+      },
+      "Atlas_PCa_PDOs_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:069d89e65080d5b3f1d8b040e96b1c0f",
+        "ext": "mtx",
+        "id": "f1f73159-04d6-45ef-ab1b-0b1bb285a7a3",
+        "key": "Atlas_PCa_PDOs_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 3818635420,
+        "storage_class": "L"
+      },
+      "Atlas_PCa_PDOs_metadata.csv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:d424e31fd934ec75351c2f72e9a44384",
+        "ext": "csv",
+        "id": "c22fa108-625d-4aff-ae7c-33e5f255bc9a",
+        "key": "Atlas_PCa_PDOs_metadata.csv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_metadata.csv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Atlas_PCa_PDOs_metadata.csv"
+        },
+        "metadata": {},
+        "mimetype": "text/csv",
+        "size": 19683511,
+        "storage_class": "L"
+      },
+      "Dolgos_2024_early_passage_PDOs_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:e814269393e3729b66b7b5a020824359",
+        "ext": "tsv",
+        "id": "7fc2539b-55bd-4848-b8e7-f1cfcb32c4e5",
+        "key": "Dolgos_2024_early_passage_PDOs_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 1495627,
+        "storage_class": "L"
+      },
+      "Dolgos_2024_early_passage_PDOs_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:854f910eedb0285ed96922bf78441757",
+        "ext": "tsv",
+        "id": "b28dc816-5a4d-4a39-ae5a-0fa98d8b1b31",
+        "key": "Dolgos_2024_early_passage_PDOs_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 115044,
+        "storage_class": "L"
+      },
+      "Dolgos_2024_early_passage_PDOs_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:b703415c8374001feff8086a6ebc95d4",
+        "ext": "mtx",
+        "id": "2488a28a-34e5-4680-a985-b0431ecfc2a6",
+        "key": "Dolgos_2024_early_passage_PDOs_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 1748785282,
+        "storage_class": "L"
+      },
+      "Dolgos_2024_early_passage_PDOs_metadata.csv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:6f98f9eb6b973b9618f5fcd9d9442846",
+        "ext": "csv",
+        "id": "b81c46b0-3e8b-4fe2-9fce-f792ee0ae8ac",
+        "key": "Dolgos_2024_early_passage_PDOs_metadata.csv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_metadata.csv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/Dolgos_2024_early_passage_PDOs_metadata.csv"
+        },
+        "metadata": {},
+        "mimetype": "text/csv",
+        "size": 18735488,
+        "storage_class": "L"
+      },
+      "SR06_sample1_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:7f6fe7809c4d5725f5f47b66260de67b",
+        "ext": "tsv",
+        "id": "a0cbcd50-b02f-43f5-aa32-5e791ca55b58",
+        "key": "SR06_sample1_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR06_sample1_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR06_sample1_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 124780,
+        "storage_class": "L"
+      },
+      "SR06_sample1_genes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:23a85a7f8254ff6c48cacc0c2b0f480e",
+        "ext": "tsv",
+        "id": "fe8d5d4b-653f-4076-ae7a-0f7a32a4aba2",
+        "key": "SR06_sample1_genes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR06_sample1_genes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR06_sample1_genes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 1955018,
+        "storage_class": "L"
+      },
+      "SR06_sample1_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:d45563618054a9f3c54264f77b49aef4",
+        "ext": "mtx",
+        "id": "8efd857d-e255-4da3-8e47-bc9686ae9ec9",
+        "key": "SR06_sample1_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR06_sample1_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR06_sample1_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 362485892,
+        "storage_class": "L"
+      },
+      "SR10_sample1_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:15d857c9baa95fc772cf3ab2b4b8df96",
+        "ext": "tsv",
+        "id": "4752ea32-df38-4331-b1e0-b876e154afd7",
+        "key": "SR10_sample1_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample1_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample1_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 118341,
+        "storage_class": "L"
+      },
+      "SR10_sample1_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "e5f7c4cc-d098-4919-9fd0-a3c4f580db1b",
+        "key": "SR10_sample1_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample1_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample1_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR10_sample1_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:0235b6094639358592d91f60e1021e2e",
+        "ext": "mtx",
+        "id": "f44c015b-201a-4a4f-843b-510f2b6eb3f2",
+        "key": "SR10_sample1_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample1_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample1_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 163299482,
+        "storage_class": "L"
+      },
+      "SR10_sample2_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:3c57703c6485d801f2e008d6abcc0048",
+        "ext": "tsv",
+        "id": "fda6c328-b17d-4803-82fd-68a1dd31d41a",
+        "key": "SR10_sample2_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample2_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample2_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 201663,
+        "storage_class": "L"
+      },
+      "SR10_sample2_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "b7a37bb9-7651-4a12-acd9-f3c637555923",
+        "key": "SR10_sample2_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample2_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample2_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR10_sample2_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:9c13d2a392a10776fb72a43bf2960b00",
+        "ext": "mtx",
+        "id": "32a1bf57-b15c-4022-a6dd-b69b74e8879b",
+        "key": "SR10_sample2_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample2_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample2_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 347940977,
+        "storage_class": "L"
+      },
+      "SR10_sample3_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:075b99e7795ca22179c4c044631df8aa",
+        "ext": "tsv",
+        "id": "3e444b49-e0ec-48aa-9052-7a4ce015ab48",
+        "key": "SR10_sample3_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample3_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample3_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 224829,
+        "storage_class": "L"
+      },
+      "SR10_sample3_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "b5b01d2d-ca03-403b-9fae-dc586920b7a8",
+        "key": "SR10_sample3_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample3_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample3_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR10_sample3_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:05a76f921163cb7a846a3c2ee3333c45",
+        "ext": "mtx",
+        "id": "4a26b6b3-7ff8-41f1-ad60-627ba5884ca4",
+        "key": "SR10_sample3_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample3_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample3_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 438191984,
+        "storage_class": "L"
+      },
+      "SR10_sample4_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:e998d2c05d4a18c567c49088333a69bc",
+        "ext": "tsv",
+        "id": "3970675c-d7f6-4f33-8e3c-5ddf4c14cdae",
+        "key": "SR10_sample4_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample4_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample4_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 288603,
+        "storage_class": "L"
+      },
+      "SR10_sample4_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "2cbeb728-2664-48ff-bd21-50891547daca",
+        "key": "SR10_sample4_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample4_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample4_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR10_sample4_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:43380ce5f4c715f4786fca65c434fefa",
+        "ext": "mtx",
+        "id": "34909b50-2164-4c60-a9c5-cb0681ecabed",
+        "key": "SR10_sample4_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR10_sample4_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR10_sample4_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 517115864,
+        "storage_class": "L"
+      },
+      "SR11_sample1_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:a82162f31a5ce62f8779bde2ba6b6a01",
+        "ext": "tsv",
+        "id": "d740a2cd-2abd-44ae-ba1b-28a2b5351c99",
+        "key": "SR11_sample1_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample1_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample1_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 190593,
+        "storage_class": "L"
+      },
+      "SR11_sample1_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "9c10b95a-e62e-4cc9-8725-a753612ff9d1",
+        "key": "SR11_sample1_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample1_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample1_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR11_sample1_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:575a6e2a0b0b8b557e7b4b284a34d46f",
+        "ext": "mtx",
+        "id": "a8a2c8bd-dd7b-461d-8bc2-6954fe0ac80b",
+        "key": "SR11_sample1_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample1_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample1_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 352068699,
+        "storage_class": "L"
+      },
+      "SR11_sample2_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:c5e53989bfa14540a42aaced42a8ea92",
+        "ext": "tsv",
+        "id": "fbf18750-2b50-493f-97c5-3d795ebd5113",
+        "key": "SR11_sample2_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample2_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample2_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 167427,
+        "storage_class": "L"
+      },
+      "SR11_sample2_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "8eef0ced-230a-4233-9ea3-e5429ef91aa1",
+        "key": "SR11_sample2_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample2_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample2_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR11_sample2_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:0cd84b4970f98ff764d213285e06ba4d",
+        "ext": "mtx",
+        "id": "1dce7699-2efb-42a1-a429-872c96def095",
+        "key": "SR11_sample2_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample2_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample2_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 285718667,
+        "storage_class": "L"
+      },
+      "SR11_sample3_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:f1e97c6579db427549f5af0ffe2c7ccf",
+        "ext": "tsv",
+        "id": "a3efed6a-dc06-443d-839e-0c570a334212",
+        "key": "SR11_sample3_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample3_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample3_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 204120,
+        "storage_class": "L"
+      },
+      "SR11_sample3_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "fd16eff1-d2b7-4a7b-b356-0b86342d5e27",
+        "key": "SR11_sample3_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample3_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample3_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR11_sample3_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:d73d32c4d12af079eb282e67ddfa8212",
+        "ext": "mtx",
+        "id": "7222b47e-996f-49c6-9764-d8394218732c",
+        "key": "SR11_sample3_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample3_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample3_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 320378209,
+        "storage_class": "L"
+      },
+      "SR11_sample4_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:bc52cf821325510d15ebbfa00500f941",
+        "ext": "tsv",
+        "id": "b61b69fa-ed3c-48d0-b538-3b5481ee8d8a",
+        "key": "SR11_sample4_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample4_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample4_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 224532,
+        "storage_class": "L"
+      },
+      "SR11_sample4_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "5a420d6a-e67a-4bee-98c1-4f37ebd21ef2",
+        "key": "SR11_sample4_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample4_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample4_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR11_sample4_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:ff9d302c4e74cb9f1e053a0b05337260",
+        "ext": "mtx",
+        "id": "1aba785d-bc18-4ddb-bbc2-834ea2c54a9c",
+        "key": "SR11_sample4_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR11_sample4_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR11_sample4_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 405090423,
+        "storage_class": "L"
+      },
+      "SR12_sample1_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:a15505b054c888da9b120e9a7fa57592",
+        "ext": "tsv",
+        "id": "03602241-5932-4c52-9c45-154aee0f2fde",
+        "key": "SR12_sample1_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample1_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample1_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 151875,
+        "storage_class": "L"
+      },
+      "SR12_sample1_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "0c86a6f2-8079-4b22-a382-448063343864",
+        "key": "SR12_sample1_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample1_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample1_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample1_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:0a21e4b2277cc604ad321cd34459228f",
+        "ext": "mtx",
+        "id": "8c51fea8-91d5-4242-bfd7-192b0483a273",
+        "key": "SR12_sample1_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample1_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample1_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 144588921,
+        "storage_class": "L"
+      },
+      "SR12_sample2_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:c5e12e41a7de5785ac2f6c1b223de8ec",
+        "ext": "tsv",
+        "id": "901eaf9e-3b12-4db7-854c-a5dcaf0ec4e7",
+        "key": "SR12_sample2_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample2_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample2_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 251856,
+        "storage_class": "L"
+      },
+      "SR12_sample2_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "f769ed81-80ec-425f-8bf9-ff8638191a53",
+        "key": "SR12_sample2_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample2_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample2_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample2_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:1c1280c6a73be9756a98295f713f2b66",
+        "ext": "mtx",
+        "id": "42493c06-858a-4c9d-bd85-9a74b2090804",
+        "key": "SR12_sample2_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample2_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample2_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 315765386,
+        "storage_class": "L"
+      },
+      "SR12_sample3_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:843c172562d7ab38e0a58d4eaa1dfad5",
+        "ext": "tsv",
+        "id": "31667351-2b34-4771-a508-bb9762ff11ae",
+        "key": "SR12_sample3_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample3_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample3_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 146583,
+        "storage_class": "L"
+      },
+      "SR12_sample3_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "70bdbbf5-00d8-4743-8823-d8a99b0d25cd",
+        "key": "SR12_sample3_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample3_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample3_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample3_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:26a24ee645a273ff0bd2fdf64a699546",
+        "ext": "mtx",
+        "id": "65ed82c3-eaab-42d2-8deb-254bd6765686",
+        "key": "SR12_sample3_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample3_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample3_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 165495887,
+        "storage_class": "L"
+      },
+      "SR12_sample4_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:fc31616d8969635a8ab5b32639c0803d",
+        "ext": "tsv",
+        "id": "2c86bb78-4c8c-4a82-9545-845f8375f456",
+        "key": "SR12_sample4_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample4_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample4_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 171180,
+        "storage_class": "L"
+      },
+      "SR12_sample4_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "de14c734-20a0-405c-8328-bede319c85ba",
+        "key": "SR12_sample4_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample4_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample4_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample4_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:5286f3d59aee16ecf07ce34a3e86e669",
+        "ext": "mtx",
+        "id": "77500b25-f2ec-43fc-8c21-becb0fa7db09",
+        "key": "SR12_sample4_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample4_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample4_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 214407959,
+        "storage_class": "L"
+      },
+      "SR12_sample5_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:72124c3956c0fffd3a57e1b75269897e",
+        "ext": "tsv",
+        "id": "6d565a5a-b46e-41cc-b27d-91e7aea4db0f",
+        "key": "SR12_sample5_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample5_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample5_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 137646,
+        "storage_class": "L"
+      },
+      "SR12_sample5_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "872ab38c-5e2d-4c35-b2d9-b59c710c6bb3",
+        "key": "SR12_sample5_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample5_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample5_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample5_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:c1ef1b66f33009d1ee407e474e0e3fe5",
+        "ext": "mtx",
+        "id": "f22dbd86-c6b3-4354-8e52-0fd1e3b7b12e",
+        "key": "SR12_sample5_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample5_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample5_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 334598788,
+        "storage_class": "L"
+      },
+      "SR12_sample6_barcodes.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:00226d6af51f7f378347e522fede1e5a",
+        "ext": "tsv",
+        "id": "4df0b49f-4bd0-4b5e-a1e6-9a44d57c5df5",
+        "key": "SR12_sample6_barcodes.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample6_barcodes.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample6_barcodes.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 103032,
+        "storage_class": "L"
+      },
+      "SR12_sample6_features.tsv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:04888cfc99ae473d41aeb54f73428ba4",
+        "ext": "tsv",
+        "id": "420c6b9d-0cef-4c52-a607-e525b99c6bf6",
+        "key": "SR12_sample6_features.tsv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample6_features.tsv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample6_features.tsv"
+        },
+        "metadata": {},
+        "mimetype": "text/tab-separated-values",
+        "size": 694699,
+        "storage_class": "L"
+      },
+      "SR12_sample6_matrix.mtx": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:c011d6c6896bfca5dbcfeaae9e361d3e",
+        "ext": "mtx",
+        "id": "f02d3f0d-918e-4be3-9fee-0b5de4d419a7",
+        "key": "SR12_sample6_matrix.mtx",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample6_matrix.mtx/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample6_matrix.mtx"
+        },
+        "metadata": {},
+        "mimetype": "application/octet-stream",
+        "size": 267603649,
+        "storage_class": "L"
+      },
+      "SR12_sample7_barcodes.tsv.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:c83db25b15ccff9cb750cc186c6bd80a",
+        "ext": "gz",
+        "id": "cfad8e9c-b394-4931-a7fb-cd81685e231d",
+        "key": "SR12_sample7_barcodes.tsv.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample7_barcodes.tsv.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample7_barcodes.tsv.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 14858,
+        "storage_class": "L"
+      },
+      "SR12_sample7_features.tsv.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:a456ba34400b83bf0f6aefc82956ce28",
+        "ext": "gz",
+        "id": "79e7c236-6aaf-4982-8eda-70dfd1ec8ab7",
+        "key": "SR12_sample7_features.tsv.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample7_features.tsv.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample7_features.tsv.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 156411,
+        "storage_class": "L"
+      },
+      "SR12_sample7_matrix.mtx.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:35fd08b6c3867142e52524727e6f5f32",
+        "ext": "gz",
+        "id": "8c7b1e74-98d2-4557-8b31-5ec15b3002bb",
+        "key": "SR12_sample7_matrix.mtx.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample7_matrix.mtx.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample7_matrix.mtx.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 29447137,
+        "storage_class": "L"
+      },
+      "SR12_sample8_barcodes.tsv.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:95d2a106105c9e5c77f3bac21ec4285b",
+        "ext": "gz",
+        "id": "d9856fcf-f293-4714-ac26-58f97ee05f56",
+        "key": "SR12_sample8_barcodes.tsv.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample8_barcodes.tsv.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample8_barcodes.tsv.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 16097,
+        "storage_class": "L"
+      },
+      "SR12_sample8_features.tsv.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:389f2f6bfff8116f4e63880b4a476305",
+        "ext": "gz",
+        "id": "958d2e4c-b641-4866-8b7f-73a79b9bd919",
+        "key": "SR12_sample8_features.tsv.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample8_features.tsv.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample8_features.tsv.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 156411,
+        "storage_class": "L"
+      },
+      "SR12_sample8_matrix.mtx.gz": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:82c27f1a36fe6d2e5a3c3a08aed12f12",
+        "ext": "gz",
+        "id": "8829d253-ca93-4181-976d-59ed794f3790",
+        "key": "SR12_sample8_matrix.mtx.gz",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/SR12_sample8_matrix.mtx.gz/content",
+          "self": "https://zenodo.org/api/records/13945275/files/SR12_sample8_matrix.mtx.gz"
+        },
+        "metadata": {},
+        "mimetype": "application/gzip",
+        "size": 52978005,
+        "storage_class": "L"
+      },
+      "scRNAseq_metadata.csv": {
+        "access": {
+          "hidden": false
+        },
+        "checksum": "md5:a137bf6832c774b78ad1e1a2f88a227c",
+        "ext": "csv",
+        "id": "70655e5e-a924-45c0-9fcc-0afe0c568bdd",
+        "key": "scRNAseq_metadata.csv",
+        "links": {
+          "content": "https://zenodo.org/api/records/13945275/files/scRNAseq_metadata.csv/content",
+          "self": "https://zenodo.org/api/records/13945275/files/scRNAseq_metadata.csv"
+        },
+        "metadata": {},
+        "mimetype": "text/csv",
+        "size": 2269,
+        "storage_class": "L"
+      }
+    },
+    "order": [],
+    "total_bytes": 10343013342
+  },
+  "id": "13945275",
+  "is_draft": false,
+  "is_published": true,
+  "links": {
+    "access": "https://zenodo.org/api/records/13945275/access",
+    "access_grants": "https://zenodo.org/api/records/13945275/access/grants",
+    "access_links": "https://zenodo.org/api/records/13945275/access/links",
+    "access_request": "https://zenodo.org/api/records/13945275/access/request",
+    "access_users": "https://zenodo.org/api/records/13945275/access/users",
+    "archive": "https://zenodo.org/api/records/13945275/files-archive",
+    "archive_media": "https://zenodo.org/api/records/13945275/media-files-archive",
+    "communities": "https://zenodo.org/api/records/13945275/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/13945275/communities-suggestions",
+    "doi": "https://doi.org/10.1101/2024.10.16.618617",
+    "draft": "https://zenodo.org/api/records/13945275/draft",
+    "files": "https://zenodo.org/api/records/13945275/files",
+    "latest": "https://zenodo.org/api/records/13945275/versions/latest",
+    "latest_html": "https://zenodo.org/records/13945275/latest",
+    "media_files": "https://zenodo.org/api/records/13945275/media-files",
+    "parent": "https://zenodo.org/api/records/13945274",
+    "parent_html": "https://zenodo.org/records/13945274",
+    "preview_html": "https://zenodo.org/records/13945275?preview=1",
+    "requests": "https://zenodo.org/api/records/13945275/requests",
+    "reserve_doi": "https://zenodo.org/api/records/13945275/draft/pids/doi",
+    "self": "https://zenodo.org/api/records/13945275",
+    "self_doi": "https://doi.org/10.1101/2024.10.16.618617",
+    "self_doi_html": "https://zenodo.org/doi/10.1101/2024.10.16.618617",
+    "self_html": "https://zenodo.org/records/13945275",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/record:13945275/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/record:13945275/sequence/default",
+    "versions": "https://zenodo.org/api/records/13945275/versions"
+  },
+  "media_files": {
+    "count": 0,
+    "enabled": false,
+    "entries": {},
+    "order": [],
+    "total_bytes": 0
+  },
+  "metadata": {
+    "additional_descriptions": [
+      {
+        "description": "<table>\n<tbody>\n<tr>\n<td>\n<p><strong>File Name</strong></p>\n</td>\n<td>\n<p><strong>Description</strong></p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>scRNAseq_metadata.csv</strong></p>\n</td>\n<td>\n<p>Contains sequencing statistics and sample-specific annotations for all 17 samples.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>SR_sample_matrix.mtx</strong></p>\n</td>\n<td>\n<p>Sparse matrix file for each sample, containing gene expression data (genes x cells) after genome alignment and cell demultiplexing. No quality control has been applied yet.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>SR_sample_features.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing gene identifiers (e.g., gene symbols or Ensembl IDs) for each sample.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>SR_sample_barcodes.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing unique cell barcodes for each sample.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Dolgos_early_passage_PDOs_matrix.mtx</strong></p>\n</td>\n<td>\n<p>Sparse matrix file for the combined early passage PDO samples. This data has undergone quality control to exclude low-quality cells.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Dolgos_early_passage_PDOs_features.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing gene identifiers for the combined early passage PDO samples.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Dolgos_early_passage_PDOs_barcodes.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing unique cell barcodes for the combined early passage PDO samples.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Dolgos_early_passage_PDOs_metadata.csv</strong></p>\n</td>\n<td>\n<p>Contains per-cell metadata for the combined early passage PDO samples. Includes UMAP coordinates, size factors used for log normalization, clustering annotations, cell cycle phase annotations, and signature scores.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Atlas_PCa_PDOs_matrix.mtx</strong></p>\n</td>\n<td>\n<p>Sparse matrix file for the combined PCa PDOs datasets (Dolgos_2024, Huang_2023, Song_2022, McCray_2019). This data has undergone quality control to exclude low-quality cells.</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Atlas_PCa_PDOs_features.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing gene identifiers for the combined PCa PDOs datasets (Dolgos_2024, Huang_2023, Song_2022, McCray_2019) .</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Atlas_PCa_PDOs_barcodes.tsv</strong></p>\n</td>\n<td>\n<p>Tab-separated file containing unique cell barcodes for the combined PCa PDOs datasets (Dolgos_2024, Huang_2023, Song_2022, McCray_2019) .</p>\n</td>\n</tr>\n<tr>\n<td>\n<p><strong>Atlas_PCa_PDOs_metadata.csv</strong></p>\n</td>\n<td>\n<p>Contains per-cell metadata for the combined early passage PDO samples. Includes UMAP coordinates, size factors used for log normalization, and cell malignancy.</p>\n</td>\n</tr>\n</tbody>\n</table>",
+        "lang": {
+          "id": "eng",
+          "title": {
+            "en": "English"
+          }
+        },
+        "type": {
+          "id": "series-information",
+          "title": {
+            "de": "Informationen zur Reihe",
+            "en": "Series information"
+          }
+        }
+      }
+    ],
+    "creators": [
+      {
+        "affiliations": [
+          {
+            "name": "University Hospital of Basel"
+          },
+          {
+            "id": "03ybx0x41",
+            "identifiers": [
+              {
+                "identifier": "03ybx0x41",
+                "scheme": "ror"
+              },
+              {
+                "identifier": "grid.509969.a",
+                "scheme": "grid"
+              }
+            ],
+            "name": "Department of Biomedicine Basel"
+          }
+        ],
+        "person_or_org": {
+          "family_name": "Le Magnen",
+          "given_name": "Cl\u00e9mentine",
+          "identifiers": [
+            {
+              "identifier": "0000-0002-6084-6054",
+              "scheme": "orcid"
+            }
+          ],
+          "name": "Le Magnen, Cl\u00e9mentine",
+          "type": "personal"
+        },
+        "role": {
+          "id": "projectleader",
+          "title": {
+            "de": "ProjektleiterIn",
+            "en": "Project leader"
+          }
+        }
+      },
+      {
+        "affiliations": [
+          {
+            "id": "04k51q396",
+            "identifiers": [
+              {
+                "identifier": "04k51q396",
+                "scheme": "ror"
+              },
+              {
+                "identifier": "grid.410567.1",
+                "scheme": "grid"
+              },
+              {
+                "identifier": "0000 0001 1882 505X",
+                "scheme": "isni"
+              }
+            ],
+            "name": "University Hospital of Basel"
+          },
+          {
+            "id": "03ybx0x41",
+            "identifiers": [
+              {
+                "identifier": "03ybx0x41",
+                "scheme": "ror"
+              },
+              {
+                "identifier": "grid.509969.a",
+                "scheme": "grid"
+              }
+            ],
+            "name": "Department of Biomedicine Basel"
+          }
+        ],
+        "person_or_org": {
+          "family_name": "Parmentier",
+          "given_name": "Romuald",
+          "identifiers": [
+            {
+              "identifier": "0000-0003-0899-8779",
+              "scheme": "orcid"
+            }
+          ],
+          "name": "Parmentier, Romuald",
+          "type": "personal"
+        },
+        "role": {
+          "id": "producer",
+          "title": {
+            "de": "ProduzentIn",
+            "en": "Producer"
+          }
+        }
+      },
+      {
+        "affiliations": [
+          {
+            "id": "04k51q396",
+            "identifiers": [
+              {
+                "identifier": "04k51q396",
+                "scheme": "ror"
+              },
+              {
+                "identifier": "grid.410567.1",
+                "scheme": "grid"
+              },
+              {
+                "identifier": "0000 0001 1882 505X",
+                "scheme": "isni"
+              }
+            ],
+            "name": "University Hospital of Basel"
+          },
+          {
+            "id": "03ybx0x41",
+            "identifiers": [
+              {
+                "identifier": "03ybx0x41",
+                "scheme": "ror"
+              },
+              {
+                "identifier": "grid.509969.a",
+                "scheme": "grid"
+              }
+            ],
+            "name": "Department of Biomedicine Basel"
+          }
+        ],
+        "person_or_org": {
+          "family_name": "Dolgos",
+          "given_name": "Robin",
+          "identifiers": [
+            {
+              "identifier": "0009-0008-4699-3331",
+              "scheme": "orcid"
+            }
+          ],
+          "name": "Dolgos, Robin",
+          "type": "personal"
+        },
+        "role": {
+          "id": "producer",
+          "title": {
+            "de": "ProduzentIn",
+            "en": "Producer"
+          }
+        }
+      }
+    ],
+    "dates": [
+      {
+        "date": "2024-10-18",
+        "type": {
+          "id": "submitted",
+          "title": {
+            "de": "Eingereicht",
+            "en": "Submitted"
+          }
+        }
+      }
+    ],
+    "description": "<p>Patient-derived organoids (PDOs) offer new opportunities to model various cancers. However, their application in prostate cancer (PCa) has been hampered by poor take-rates and overgrowth of benign cell types. Initial experiments with 136 samples highlighted the limitations of existing culture conditions, while 30 additional samples were subsequently used to explore the effects of niche factors, carbon source, and extracellular matrix (ECM) composition on organoid outcome. Single-cell RNA sequencing&nbsp;(scRNA-seq) reveals that Matrigel-free PDOs exhibit cellular heterogeneity and preserve patient-specific PCa cell populations with active AR signaling, while enriching in intermediate club cell populations. In contrast, Matrigel fails to maintain primary PCa cells and produces&nbsp;<em>in vitro</em>&nbsp;basal-like benign transcriptomic profiles that are divergent from patient samples. Furthermore, we redefine&nbsp;cell type-signatures, identifying RNA- and protein-based biomarkers discriminating&nbsp;tumor&nbsp;<em>versus</em>&nbsp;all other cell types&nbsp;<em>ex vivo,</em> and show that expression of laminin-binding integrins is a hallmark of Matrigel-derived organoids. Finally, integrating previously-published datasets&nbsp;with&nbsp;our new data, we generate&nbsp;the first&nbsp;Prostate PDO single-cell atlas (PPScA). The PPScA captures a spectrum of cellular identities and malignancies, while revealing pathways universally altered in PDOs as compared to primary PCa tissues. Altogether, our study represents a significant advancement in the field, providing methodological improvements and novel cellular biology insights.</p>",
+    "funding": [
+      {
+        "award": {
+          "id": "00yjd3n13::205086",
+          "number": "205086",
+          "program": "Projects",
+          "title": {
+            "en": "Investigating prostate cancer cellular heterogeneity and treatment response at single-cell level"
+          }
+        },
+        "funder": {
+          "id": "00yjd3n13",
+          "name": "Swiss National Science Foundation"
+        }
+      },
+      {
+        "award": {
+          "number": "KLbB-5329-03-2021",
+          "title": {
+            "en": "Dissecting prostate cancer cellular heterogeneity and treatment response at single-cell level"
+          }
+        },
+        "funder": {
+          "id": "05v5ag345",
+          "name": "Krebsliga Beider Basel"
+        }
+      },
+      {
+        "award": {
+          "number": "KFS-5552-02-2022",
+          "title": {
+            "en": "An organoid-based co-clinical pilot trial in metastatic prostate cancer"
+          }
+        },
+        "funder": {
+          "id": "022wnsy59",
+          "name": "Krebsforschung Schweiz"
+        }
+      }
+    ],
+    "languages": [
+      {
+        "id": "eng",
+        "title": {
+          "en": "English"
+        }
+      }
+    ],
+    "publication_date": "2024-10-17",
+    "publisher": "Zenodo",
+    "references": [
+      {
+        "reference": "ECM-free patient-derived organoids preserve diverse prostate cancer lineages and uncover in vitro-enriched cell types Robin Dolgos, Romuald Parmentier, Jing Wang, Raphaelle Servant, Arnoud J Templeton, Tobias Zellweger, Alastair D Lamb, Kirsten D Mertz, Svetozar Subotic, Tatjana Vlajnic, Helge Seifert, Ashkan Mortezavi, Cyrill A Rentsch, Lukas Bubendorf, Clementine Le Magnen bioRxiv 2024.10.16.618617; doi: https://doi.org/10.1101/2024.10.16.618617"
+      }
+    ],
+    "related_identifiers": [
+      {
+        "identifier": "37550827",
+        "relation_type": {
+          "id": "references",
+          "title": {
+            "de": "Referenziert",
+            "en": "References"
+          }
+        },
+        "resource_type": {
+          "id": "publication",
+          "title": {
+            "de": "Publikation",
+            "en": "Publication"
+          }
+        },
+        "scheme": "pmid"
+      },
+      {
+        "identifier": "35013146",
+        "relation_type": {
+          "id": "references",
+          "title": {
+            "de": "Referenziert",
+            "en": "References"
+          }
+        },
+        "resource_type": {
+          "id": "publication",
+          "title": {
+            "de": "Publikation",
+            "en": "Publication"
+          }
+        },
+        "scheme": "pmid"
+      },
+      {
+        "identifier": "31317052",
+        "relation_type": {
+          "id": "references",
+          "title": {
+            "de": "Referenziert",
+            "en": "References"
+          }
+        },
+        "resource_type": {
+          "id": "publication",
+          "title": {
+            "de": "Publikation",
+            "en": "Publication"
+          }
+        },
+        "scheme": "pmid"
+      }
+    ],
+    "resource_type": {
+      "id": "dataset",
+      "title": {
+        "de": "Datensatz",
+        "en": "Dataset"
+      }
+    },
+    "rights": [
+      {
+        "description": {
+          "en": "The Creative Commons Attribution license allows re-distribution and re-use of a licensed work on the condition that the creator is appropriately credited."
+        },
+        "icon": "cc-by-icon",
+        "id": "cc-by-4.0",
+        "props": {
+          "scheme": "spdx",
+          "url": "https://creativecommons.org/licenses/by/4.0/legalcode"
+        },
+        "title": {
+          "en": "Creative Commons Attribution 4.0 International"
+        }
+      }
+    ],
+    "subjects": [
+      {
+        "id": "euroscivoc:1473",
+        "identifiers": [
+          {
+            "identifier": "http://data.europa.eu/8mn/euroscivoc/b8c70f77-deaa-4f3c-926c-f2fb369ba878",
+            "scheme": "url"
+          }
+        ],
+        "props": {
+          "parents": "euroscivoc:21,euroscivoc:39,euroscivoc:225"
+        },
+        "scheme": "EuroSciVoc",
+        "subject": "Prostate cancer"
+      },
+      {
+        "id": "euroscivoc:163",
+        "identifiers": [
+          {
+            "identifier": "http://data.europa.eu/8mn/euroscivoc/3aa7fb7c-2eba-4211-a8f4-8d1ccaddc7e2",
+            "scheme": "url"
+          }
+        ],
+        "props": {
+          "parents": "euroscivoc:21,euroscivoc:37"
+        },
+        "scheme": "EuroSciVoc",
+        "subject": "Cells technologies"
+      }
+    ],
+    "title": "Single-cell analysis uncovers preserved prostate cancer lineages and universally altered pathways in Matrigel-free patient-derived organoids"
+  },
+  "parent": {
+    "access": {
+      "grants": [],
+      "links": [
+        {
+          "id": "11c60ca2-02bd-4d90-822c-05e62a9746bf"
+        }
+      ],
+      "owned_by": {
+        "user": "1204624"
+      },
+      "settings": {
+        "accept_conditions_text": null,
+        "allow_guest_requests": false,
+        "allow_user_requests": false,
+        "secret_link_expiration": 0
+      }
+    },
+    "communities": {},
+    "id": "13945274",
+    "pids": {}
+  },
+  "pids": {
+    "doi": {
+      "identifier": "10.1101/2024.10.16.618617",
+      "provider": "external"
+    },
+    "oai": {
+      "identifier": "oai:zenodo.org:13945275",
+      "provider": "oai"
+    }
+  },
+  "revision_id": 4,
+  "stats": {
+    "all_versions": {
+      "data_volume": 2298977836.0,
+      "downloads": 30,
+      "unique_downloads": 20,
+      "unique_views": 0,
+      "views": 0
+    },
+    "this_version": {
+      "data_volume": 2298977836.0,
+      "downloads": 30,
+      "unique_downloads": 20,
+      "unique_views": 0,
+      "views": 0
+    }
+  },
+  "status": "published",
+  "swh": {},
+  "updated": "2025-05-27T09:34:47.106398+00:00",
+  "versions": {
+    "index": 1,
+    "is_latest": true,
+    "is_latest_draft": true
+  }
+}
