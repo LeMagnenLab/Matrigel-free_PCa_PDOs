@@ -475,7 +475,7 @@ check_aliase = function(sce, gene){
 
 
 
-GeomSplitViolin <- ggplot2::ggproto("GeomSplitViolin", GeomViolin,
+GeomSplitViolin <- ggplot2::ggproto(`_class` = "GeomSplitViolin",`_inherit` =  GeomViolin,
                                     draw_group = function(self, data, ..., draw_quantiles = NULL) {
                                       data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
                                       grp <- data[1, "group"]
