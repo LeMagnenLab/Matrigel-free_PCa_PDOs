@@ -1,3 +1,5 @@
+
+
 # Load needed files from previous experiment 
 get_exp_file_path = function(root = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects", organ, project, samples_ID, prev_exp, pattern, last = T){
   
@@ -25,20 +27,26 @@ get_exp_file_path = function(root = "/scicore/home/wykopa75/GROUP/rparmentier/sc
 }
 
 ## Create output path in exp folder
-create_exp_folder <- function(  root = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/", organ, project, samples_ID, exp) {
+create_exp_folder <- function(github_dir, samples_ID, exp) {
+  # Define the base output directory within the cloned GitHub repository
+  output_dir <- file.path(github_dir, "output")
   
-  sample_dir <- paste0(root, "/", organ, "/", project, "/exp/", samples_ID, "/")
-  exp_dir <- paste0(sample_dir, exp, "/")
+  # Define the sample and experiment directories
+  sample_dir <- file.path(output_dir, samples_ID)
+  exp_dir <- file.path(sample_dir, exp)
   
-  if (dir.exists(sample_dir)) { # Test if sample folder is already existing
-    if (dir.exists(exp_dir)) { # If yes test if experiment folder is already existing
-      print(paste("The exp", exp, "already exists for the sample", samples_ID)) # If yes says so
+  # Create directories as needed
+  if (dir.exists(sample_dir)) {
+    if (dir.exists(exp_dir)) {
+      message("The experiment '", exp, "' already exists for the sample '", samples_ID, "'.")
     } else {
-      dir.create(path = exp_dir) # If no creates it
+      dir.create(exp_dir, recursive = TRUE)
+      message("Created experiment directory: ", exp_dir)
     }
   } else {
-    dir.create(path = sample_dir) # If no sample folder existing, creates it, then creates the experiment folder
-    dir.create(path = exp_dir)  }
+    dir.create(exp_dir, recursive = TRUE)
+    message("Created experiment directory: ", exp_dir)
+  }
   
   return(exp_dir)
 }
@@ -468,45 +476,45 @@ check_aliase = function(sce, gene){
   
 }
 
-
-###########################################
-#### violin split function
-###########################################
-
-
-
-GeomSplitViolin <- ggplot2::ggproto(`_class` = "GeomSplitViolin",`_inherit` =  GeomViolin,
-                                    draw_group = function(self, data, ..., draw_quantiles = NULL) {
-                                      data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
-                                      grp <- data[1, "group"]
-                                      newdata <- plyr::arrange(transform(data, x = if (grp %% 2 == 1) xminv else xmaxv), if (grp %% 2 == 1) y else -y)
-                                      newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
-                                      newdata[c(1, nrow(newdata) - 1, nrow(newdata)), "x"] <- round(newdata[1, "x"])
-                                      
-                                      if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
-                                        stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <=
-                                                                                  1))
-                                        quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
-                                        aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
-                                        aesthetics$alpha <- rep(1, nrow(quantiles))
-                                        both <- cbind(quantiles, aesthetics)
-                                        quantile_grob <- GeomPath$draw_panel(both, ...)
-                                        ggplot2:::ggname("geom_split_violin", grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
-                                      }
-                                      else {
-                                        ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
-                                      }
-                                    })
-
-
-
-geom_split_violin <- function(mapping = NULL, data = NULL, stat = "ydensity", position = "identity", ...,
-                              draw_quantiles = NULL, trim = TRUE, scale = "area", na.rm = FALSE,
-                              show.legend = NA, inherit.aes = TRUE) {
-  layer(data = data, mapping = mapping, stat = stat, geom = GeomSplitViolin,
-        position = position, show.legend = show.legend, inherit.aes = inherit.aes,
-        params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
-}
+# 
+# ###########################################
+# #### violin split function
+# ###########################################
+# 
+# 
+# 
+# GeomSplitViolin <- ggplot2::ggproto(`_class` = "GeomSplitViolin",`_inherit` =  GeomViolin,
+#                                     draw_group = function(self, data, ..., draw_quantiles = NULL) {
+#                                       data <- transform(data, xminv = x - violinwidth * (x - xmin), xmaxv = x + violinwidth * (xmax - x))
+#                                       grp <- data[1, "group"]
+#                                       newdata <- plyr::arrange(transform(data, x = if (grp %% 2 == 1) xminv else xmaxv), if (grp %% 2 == 1) y else -y)
+#                                       newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+#                                       newdata[c(1, nrow(newdata) - 1, nrow(newdata)), "x"] <- round(newdata[1, "x"])
+#                                       
+#                                       if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+#                                         stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <=
+#                                                                                   1))
+#                                         quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+#                                         aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+#                                         aesthetics$alpha <- rep(1, nrow(quantiles))
+#                                         both <- cbind(quantiles, aesthetics)
+#                                         quantile_grob <- GeomPath$draw_panel(both, ...)
+#                                         ggplot2:::ggname("geom_split_violin", grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+#                                       }
+#                                       else {
+#                                         ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+#                                       }
+#                                     })
+# 
+# 
+# 
+# geom_split_violin <- function(mapping = NULL, data = NULL, stat = "ydensity", position = "identity", ...,
+#                               draw_quantiles = NULL, trim = TRUE, scale = "area", na.rm = FALSE,
+#                               show.legend = NA, inherit.aes = TRUE) {
+#   layer(data = data, mapping = mapping, stat = stat, geom = GeomSplitViolin,
+#         position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+#         params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
+# }
 
 
 ################################
