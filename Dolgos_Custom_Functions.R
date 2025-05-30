@@ -1,25 +1,29 @@
 
 
 # Load needed files from previous experiment 
-get_exp_file_path = function(root = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects", organ, project, samples_ID, prev_exp, pattern, last = T){
+get_exp_file_path = function(github_dir, samples_ID, prev_exp, pattern){
   
-  sample_dir <- paste0(root, "/", organ, "/", project, "/exp/", samples_ID, "/")
-  prev_exp_dir <- paste0(sample_dir, prev_exp)
+  prev_exp_dir <- file.path(github_dir,"output",samples_ID,prev_exp)  
   
   print(paste0("Searching file in ", prev_exp_dir))
   
   list_files = list.files(
     path = prev_exp_dir, 
     pattern = pattern, 
-    full.names = T)
+    full.names = F)
   
-  if (last == T) {
+  if (length(list_files) == 1) {
     
-    file = list_files[length(list_files)]
+    file = list_files[1]
+    print(paste0("File path found: ", file))
     
     return(file)
     
-  }else{ return(list_files) }
+  }else if(length(list_files) == 0) {
+    
+    print("No file found at this direction with this pattern. Check direction of file name")
+
+    return(list_files)}else{print("Multiple file matching this pattern found, please refine.")}
   
   # Return the file path 
   # Then user choose the appropriate function to load the file depending on the type
@@ -28,6 +32,7 @@ get_exp_file_path = function(root = "/scicore/home/wykopa75/GROUP/rparmentier/sc
 
 ## Create output path in exp folder
 create_exp_folder <- function(github_dir, samples_ID, exp) {
+  
   # Define the base output directory within the cloned GitHub repository
   output_dir <- file.path(github_dir, "output")
   
