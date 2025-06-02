@@ -1,0 +1,299 @@
+---
+title: '3.Dolgos early passage PDOs: cell cycle annotation'
+author: "Romuald Parmentier"
+date: "2024-10-09"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  exp = "3_cycle_annotation"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "1_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds") # Internally normalized samples for cycle annotation
+
+list_sce = readRDS(file = file_path) 
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "2_dimension_reduction", 
+  pattern = "sce_comb_dim_reduced.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+# Cell type assignation 
+
+Not povided by the authors and not needed here. 
+
+# Cell cycle assignation 
+
+Done according standrad Seurat procedure
+
+```{r Cell cycle phase annotation}
+
+sce_id = 1
+
+for(sce in list_sce){ 
+  
+  name = names(list_sce)[[sce_id]]
+  
+  # Transform sce object in seurat object
+  seurat = as.Seurat(
+    x = sce,
+    counts = "counts",
+    data = NULL
+  )
+  
+  DefaultAssay(object = seurat) = "originalexp"
+  seurat <- NormalizeData(seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+  seurat <- ScaleData(seurat)
+  
+  # Store cell cycles-associated genes in variables
+  s.genes <- cc.genes.updated.2019$s.genes
+  g2m.genes <- cc.genes.updated.2019$g2m.genes
+  
+  
+  # Compute the cell cycle signature score
+  seurat <- CellCycleScoring(seurat, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+  
+  # Add cell cycle phase to the sce object
+  sce$cell_cycle_phase = seurat$Phase
+  
+  # Print cell cycles phases stats
+  cat(paste0("Sample: ", name))
+  
+  print(table(sce$cell_cycle_phase))
+
+# Add marked object to a lst
+list_sce[[name]] = sce
+
+sce_id = sce_id + 1
+
+}
+
+```
+
+```{r Add cell_cycle_phase to sce_comb object for visualization}
+
+# Get cell barcodes/identifiers from the combined object
+combined_cells <- colnames(sce_comb)
+
+# Initialize an empty vector to store cycle phases
+combined_cycle_phase <- rep(NA, length(combined_cells))
+
+#  Iterate through each SCE object in the list and transfer cycle_Phase
+for (sce in list_sce) {
+  
+  # Get cell barcodes/identifiers from the current SCE object
+  sce_cells <- colnames(sce)
+  
+  # Extract cycle_Phase for cells in the current SCE
+  cycle_phase <- colData(sce)$cell_cycle_phase
+  
+  # Match cells in the current SCE with cells in the combined object
+  matched_indices <- match(sce_cells, combined_cells)
+  
+  # Assign cycle_Phase to corresponding cells in the combined object
+  # Make sure to filter non-matching cases (NA)
+  combined_cycle_phase[matched_indices] <- cycle_phase
+  
+}
+
+# Add the combined cycle_Phase to the colData of sce_comb
+colData(sce_comb)$cell_cycle_phase <- combined_cycle_phase
+
+```
+
+# Visualizing cell cycles 
+
+```{r Extracting metadata table}
+
+md = as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Single UMAP colored with cell cycle Phase = Sup.Fig3A }
+
+##################
+### UMAP S ######
+##################
+
+md_other <- subset(md, cell_cycle_phase != "S")
+md_SPhase <- subset(md, cell_cycle_phase == "S")
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_other,
+      aes(x = UMAP_1, y = UMAP_2), 
+      fill = "grey", alpha = 0.2, size = 0.9, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2 
+    ), dpi = 300, scale = 1
+  ) +
+  # Rasterise the second layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_SPhase,
+      aes(x = UMAP_1, y = UMAP_2, fill = cell_cycle_phase), 
+      alpha = 0.7, size = 1.3, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+  dpi = 300, scale = 1) +
+  scale_fill_manual(values = pal_cell_cycle_phase) +
+  theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_SPhase.pdf"),
+  device = "pdf",
+  width = 10,
+  height = 8)
+
+##################
+### UMAP G1 ######
+##################
+
+md_other <- subset(md, cell_cycle_phase != "G1")
+md_G1Phase <- subset(md, cell_cycle_phase == "G1")
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_other,
+      aes(x = UMAP_1, y = UMAP_2), 
+      fill = "grey", alpha = 0.2, size = 0.9, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2 
+    ), dpi = 300, scale = 1
+  ) +
+  # Rasterise the second layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_G1Phase,
+      aes(x = UMAP_1, y = UMAP_2, fill = cell_cycle_phase), 
+      alpha = 0.7, size = 1.3, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+  dpi = 300, scale = 1) +
+  scale_fill_manual(values = pal_cell_cycle_phase) +
+  theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_G1Phase.pdf"),
+  device = "pdf",
+  width = 10,
+  height = 8)
+
+###################
+### UMAP G2M ######
+###################
+
+md_other <- subset(md, cell_cycle_phase != "G2M")
+md_G2MPhase <- subset(md, cell_cycle_phase == "G2M")
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_other,
+      aes(x = UMAP_1, y = UMAP_2), 
+      fill = "grey", alpha = 0.2, size = 0.9, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2 
+    ), dpi = 300, scale = 1
+  ) +
+  # Rasterise the second layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md_G2MPhase,
+      aes(x = UMAP_1, y = UMAP_2, fill = cell_cycle_phase), 
+      alpha = 0.7, size = 1.3, 
+      shape = 21,
+      color = "gray10",
+      stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+  dpi = 300, scale = 1) +
+  scale_fill_manual(values = pal_cell_cycle_phase) +
+  theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_G2MPhase.pdf"),
+  device = "pdf",
+  width = 10,
+  height = 8)
+
+```
+
+# Export files
+
+```{r export the objects}
+
+# Export annotated sce object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_cycle_annotated.rds")
+)
+
+```

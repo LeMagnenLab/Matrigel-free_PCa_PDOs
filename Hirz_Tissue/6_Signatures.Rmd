@@ -1,0 +1,421 @@
+---
+title: "6_Hirz_2022_signatures"
+author: "Romuald Parmentier"
+date: "2024-12-30"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+#Libraries
+library(SingleCellExperiment)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggbeeswarm)
+library(gridExtra)
+library(scater)
+library(org.Hs.eg.db)
+library(ComplexHeatmap)
+library(ggpubr)
+library(rstatix)
+
+
+# Functions and palettes
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Parental_vs_PDO_Functions.R")
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Parental_vs_PDO_Color_Palettes.R")
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  exp = "signatures"
+)
+
+# Create output path for specific signatures
+out_path_signature = create_exp_folder(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  exp = "signatures"
+)
+
+```
+
+# Prepare the data
+
+```{r Load sce object after dimension reduction and restrcit it to groups of interest}
+
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  prev_exp = "dimension_reduction",
+  pattern = "sce_comb_dim_reduced.rds")
+
+sce_comb = readRDS(file = file_path) 
+
+# Restrict the sce object to the cell types of interests
+sce_comb_focus = sce_comb[ , which(sce_comb$cell_type_broad %in% c("Epithelial_Luminal", "Epithelial_Basal", "Epithelial_Club", "Epithelial_Tumor"))]
+
+sce_comb_focus$Malignancy = ifelse(test = sce_comb_focus$cell_type_broad == "Epithelial_Tumor", yes = "Epithelial_Tumor", no = "Epithelial_Healthy")
+
+# Custom gene sets file
+custom_gene_sets = read.csv2(
+  file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/New_New_Gene_List_Dimitrios.csv",
+  header = T)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb_focus = as.Seurat(
+  x = sce_comb_focus, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb_focus) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb_focus = ScaleData(seurat_comb_focus)
+
+```
+
+```{r Add signature score to sce object}
+
+for(gene_set in unique(custom_gene_sets$Gene_set_name)){
+  
+  print(paste0("Adding signature score for: ", gene_set))
+  
+  # Select genes on which calculating the signature score
+  genes_of_interest <- custom_gene_sets %>% filter(Gene_set_name == gene_set)
+  genes_of_interest = as.vector(genes_of_interest$Genes)
+  
+  # Calculate signature score and add it to seurat object as an alternative assays (signature only + signature genes only)
+  seurat_comb_focus = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb_focus, 
+    signature_name = gene_set, 
+    signature_genes = genes_of_interest
+  )
+  
+  # Transfer the signature score from seurat to sce (score in colData, genes of the signature marked in the rowData)
+  sce_comb_focus = add_signature_score_to_sce(
+    sce_object = sce_comb_focus,
+    seurat_object = seurat_comb_focus,
+    signature_name = gene_set,
+    seurat_assay = paste0(gene_set, "_score_only"),
+    signature_genes = genes_of_interest
+  )
+  
+}
+
+
+```
+
+## Visualize it
+
+```{r Export all metadata into a dataframe}
+
+md = colData(sce_comb_focus)
+md = as_data_frame(md)
+md_long = pivot_longer(data = md,cols = contains("score"),names_to = "score_name", values_to = "score_values")
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+
+```
+
+Split and colored by cell type
+
+```{r Stats}
+
+# First conduct kruskal wallis test as data are not normally distributed and we want to compare more than two groups
+kruskal_test <- md_long %>%
+  group_by(score_name) %>%
+  kruskal_test(score_values ~ cell_type_broad)
+
+# Kruskal wallis states that there is at least one difference between distribition of the groups
+# Perform Dunn test for each groups (will compute all combination for all cell_type_broad) 
+# And correct for Type I error (FALSE positives) with fdr method (most stringent) because more than one comparison
+
+dunn_test <- md_long %>%
+  group_by(score_name) %>%
+  dunn_test(score_values ~ cell_type_broad, p.adjust.method = "fdr")
+
+```
+
+```{r Violin plots }
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_plot = md_long %>%
+    filter(cell_type_broad %in% c("Epithelial_Luminal", "Epithelial_Basal", "Epithelial_Club")) %>%
+    filter(score_name == gene_signature)
+  
+  md_plot$cell_type_broad = factor(md_plot$cell_type_broad,levels = c("Epithelial_Luminal", "Epithelial_Basal", "Epithelial_Club"))
+  
+  stat_plot = dunn_test %>%
+    filter(score_name == gene_signature) %>%
+    filter(group2 %in% unique(md_plot$cell_type_broad) & group2 %in% unique(md_plot$cell_type_broad))
+  
+  # Compute dynamic y-position for p-values
+  y_max <- max(md_plot$score_values, na.rm = TRUE)
+  y_positions <- seq(y_max * 1.05, y_max * 1.15, length.out = nrow(stat_plot))  # Adjusted range
+  
+  # Careful, to be able to add a rstatix layer on the plots, we need to use at leat on layer of ggpubr plot (like ggboxplot or ggviolin)
+  plot = ggviolin( 
+    data = md_plot, 
+    x = "cell_type_broad", 
+    y = "score_values", 
+    fill = "cell_type_broad",
+    trim = TRUE,        
+    scale = "width",    
+    width = 0.6   
+  ) + 
+    stat_pvalue_manual(
+      stat_plot, label = "p.adj.signif", 
+      y.position = y_positions,
+      tip.length = 0) +
+    geom_boxplot(
+      data = md_plot,
+      aes(x = cell_type_broad, y = score_values, fill = cell_type_broad),  
+      width = 0.1,  
+      position = position_dodge(0.5),
+      outlier.shape = NA,
+      color = "black"
+    ) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  
+    scale_fill_manual(values = c("Epithelial_Basal" = "lightgreen",
+                                 "Epithelial_Luminal" = "lightblue", 
+                                 "Epithelial_Club" = "orange", 
+                                 "Epithelial_Tumor" = "darkred")) +  
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  plot_list[[gene_signature]] = plot
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_per_cell_type.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+Split and colored by tumor grade
+
+```{r Stats}
+
+md_long = md %>%
+  filter(cell_type_broad == "Epithelial_Tumor") %>%
+  pivot_longer(cols = contains("score"),names_to = "score_name", values_to = "score_values")
+
+# To perform wilcoxon data should be simitrically distributed arround the median (not really the case here)
+ggdensity(md_long, x = "score_values", rug = TRUE, fill = "lightgray") +
+  stat_central_tendency(type = "median", color = "red", linetype = "dashed") 
+
+
+wilcoxon_test_df <- md_long %>%
+  group_by(score_name) %>%
+  wilcox_test(score_values ~ Grade) %>%
+  add_significance()
+
+```
+
+```{r Violin plots }
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_plot = md_long %>%
+    dplyr::filter(score_name == gene_signature)
+  
+  md_plot$Grade = factor(md_plot$Grade, levels = c("low_grade", "high_grade"))
+  
+  stat_plot = wilcoxon_test_df %>%
+    dplyr::filter(score_name == gene_signature)
+  
+  # Compute dynamic y-position for p-values
+  y_max <- max(md_plot$score_values, na.rm = TRUE)
+  y_positions <- seq(y_max * 1.05, y_max * 1.15, length.out = nrow(stat_plot))  # Adjusted range
+  
+  # Careful, to be able to add a rstatix layer on the plots, we need to use at leat on layer of ggpubr plot (like ggboxplot or ggviolin)
+  plot = ggviolin( 
+    data = md_plot, 
+    x = "Grade", 
+    y = "score_values", 
+    fill = "Grade",
+    trim = TRUE,        
+    scale = "width",    
+    width = 0.6   
+  ) + 
+    stat_pvalue_manual(stat_plot, label = "p.signif", y.position = y_positions) +
+    geom_boxplot(
+      data = md_plot,
+      aes(x = Grade, y = score_values, fill = Grade),  
+      width = 0.1,  
+      position = position_dodge(0.5),
+      outlier.shape = NA,
+      color = "black"
+    ) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  
+    scale_fill_manual(values = c("low_grade" = "lightblue", 
+                                 "high_grade" = "darkblue")) +  
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  plot_list[[gene_signature]] = plot
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_per_grade.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+
+Split by malignancy 
+
+```{r Stats }
+
+# To perform wilcoxon data should be simitrically distributed arround the median (~ok here)
+ggdensity(data = md_long, x = "score_values", rug = TRUE, fill = "lightgray") +
+  stat_central_tendency(type = "median", color = "red", linetype = "dashed") +
+  facet_wrap(
+    ~score_name,
+    scales = "free")  
+
+# Perfroem wilcoxon test of each score independently amon broad types
+wilcoxon_test_df <- md_long %>%
+  group_by(score_name) %>%
+  wilcox_test(score_values ~ Malignancy) %>%
+  add_significance()
+
+```
+
+```{r Violin plots }
+
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_plot = md_long %>%
+    filter(score_name == gene_signature)
+  
+  md_plot$Malignancy = factor(md_plot$Malignancy,levels = c("Epithelial_Healthy", "Epithelial_Tumor"))
+  
+  stat_plot = wilcoxon_test_df %>%
+    filter(score_name == gene_signature) 
+  
+  # Compute dynamic y-position for p-values
+  y_max <- max(md_plot$score_values, na.rm = TRUE)
+  y_positions <- seq(y_max * 1.05, y_max * 1.15, length.out = nrow(stat_plot))  # Adjusted range
+  
+  # Careful, to be able to add a rstatix layer on the plots, we need to use at leat on layer of ggpubr plot (like ggboxplot or ggviolin)
+  plot = ggviolin( 
+    data = md_plot, 
+    x = "Malignancy", 
+    y = "score_values", 
+    fill = "Malignancy",
+    trim = TRUE,        
+    scale = "width",    
+    width = 0.6   
+  ) + 
+    stat_pvalue_manual(
+      stat_plot, label = "p.signif", 
+      y.position = y_positions,
+      tip.length = 0) +
+    geom_boxplot(
+      data = md_plot,
+      aes(x = Malignancy, y = score_values, fill = Malignancy),  
+      width = 0.1,  
+      position = position_dodge(0.5),
+      outlier.shape = NA,
+      color = "black"
+    ) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  
+    scale_fill_manual(values = c("Epithelial_Healthy" = "pink",
+                                 "Epithelial_Tumor" = "darkred")) +  
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  plot_list[[gene_signature]] = plot
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_per_Malignancy.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_epithalial_signed.rds"))
+
+```
+

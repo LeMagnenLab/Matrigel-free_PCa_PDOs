@@ -1,0 +1,486 @@
+---
+title: '6.Atlas PCa PDOS (Dolgos, Huang, Song, McCray): Infer CNV visualisation'
+author: "Romuald Parmentier"
+date: "2024-10-11"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(UCell)
+library(dplyr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggpubr)
+library(grid)
+library(rstatix)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  exp = "6_infer_cnv_visualization"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# sce_comb object after dimension reduction 
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "4_cell_type_annotation",
+  pattern = "sce_comb_cell_type_annotated")
+
+sce_comb = readRDS(file_path)
+
+# Infer CNV score alculated on the sce_comb input
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "5_infer_cnv",
+  pattern = "High_CNV_scores_per_cell_10pct")
+
+scores = readRDS(file_path)
+
+```
+
+```{r Add infer_cnv scores to the sce object}
+
+sce_comb = sce_comb[, colnames(sce_comb) %in% names(scores)]
+sce_comb$infercnv_score = scores[colnames(sce_comb)]
+
+```
+
+# Visualization
+
+```{r Extract metadata and store them in a df, warning=FALSE}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+md = md %>%
+  tidyr::drop_na()
+
+# Change Cell_Type to a factor and control levels order
+md$Cell_Type = factor(md$Cell_Type, levels = c("Basal/Hillock", "Club","Transitioning", "Tumor"))
+
+# Subcategorize organoiuds type with Cell_Type
+md$Organoid_Type_Cell_Type = paste0(md$Organoid_Type,"_",md$Cell_Type)
+md$Organoid_Type_Cell_Type = ifelse(
+  test = grepl(x = md$Organoid_Type_Cell_Type,pattern =  "Previously_Published_"),
+  yes = sub(x = md$Organoid_Type_Cell_Type, pattern = "Previously_Published_",replacement = "PDOs_"),
+  no = md$Organoid_Type_Cell_Type )
+
+```
+
+## Density plots (comparing inferCNV score between Cell_Type)
+
+```{r Density plot with samples merged and colored by Cell_Type = Fig5.C}
+
+# Remove Infer_CNV reference samples (as they all have score ~= 0 and will inflate 0 bin "artifically")
+ref_samples =c("PR5249_normal_derived_org",
+               "PR5251_normal_derived_org",
+               "PR5254_normal_derived_org",
+               "PR5261_normal_derived_org",
+               "PR5316_normal_derived_org",
+               "GSM3735994_McCray_2019")
+
+# Remove infer_CNV ref (because their score will be automatically low) and low-represented group pf cells (< 20)
+
+md_wo_ref = md %>%
+  dplyr::filter(!(Sample_Name %in% ref_samples)) %>%
+  group_by(Sample_Name) %>%
+  dplyr::filter(n()> 20)
+
+# Density plot all samples merged
+plot = ggplot(data = md_wo_ref, aes(infercnv_score, fill = Organoid_Type_Cell_Type)) + 
+  theme_minimal() +
+  xlim(c(0,0.5)) +
+  ylim(c(0,14)) +
+  geom_density(colour = "black", alpha = 0.7) +
+  scale_fill_manual(values = pal_line_type)
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_density_Infer_CNV_Cell_Type_Merged.pdf"),
+  device = "pdf",
+  width = 10,
+  height = 6)
+
+```
+
+```{r Density plot split per samples colored by Cell_Type}
+
+# Choose order of appearance
+md_wo_ref$Sample_Name = factor(
+  md_wo_ref$Sample_Name, 
+  levels = c("HNW_PR5269", "HNW_PR5316",
+             "PR5251_tumor_derived_org", "PR5254_tumor_derived_org", "PR5261_tumor_derived_org", 
+             "PR5269_tumor_derived_org", "PR5274_tumor_derived_org","PR5316_tumor_derived_org",
+             "P22-36_Org_Mat", "P23-51_Org_ECMf", "P23-53_Org_ECMf","P23-36_Org_Mat", "P23-36_Org_ECMf",
+             "P24-06_Org_Mat", "P24-06_Org_ECMf","P24-12_Org_Mat","P24-14_Org_ECMf",
+             "P20-11_Org_ECMf","P20-11_Org_Mat",
+             "P20-23_Org_ECMf","P20-23_Org_Mat",                    
+             "MSK_PCa2_ECMf","MSK_PCa2_Mat"))
+
+# Remove groups of less than 20 cells
+md_wo_ref_filtered = md_wo_ref %>%
+  group_by(Sample_Name, Cell_Type) %>%
+  mutate(count = n()) %>%
+  dplyr::filter(count > 20)
+
+plot_list = list()
+i = 1
+
+for(sample in levels(md_wo_ref_filtered$Sample_Name)){
+  
+  df = md_wo_ref_filtered %>%
+    dplyr::filter(Sample_Name == sample)
+  
+  plot = ggplot(data = df, aes(infercnv_score, fill = Cell_Type)) + 
+    theme_minimal() +
+    xlim(c(0,0.5)) +
+    labs(title = sample) +
+    geom_density(colour = "black", alpha = 0.7) +
+    scale_fill_manual(values = pal_cell_type) +
+    theme(
+      legend.position = "none")
+  
+  
+  plot_list[[i]] = plot
+  i = i + 1
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list,        # List of plots to arrange
+  nrow = 5,                 # Number of rows per page
+  ncol = 2                  # Number of columns per page
+)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_density_Infer_CNV_Cell_Type_Per_Sample.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,units = "mm")
+
+```
+
+# Box plots (comparing inferCNV score between Cell_Type)
+
+```{r Box plot of infer_cnv scores for each CLM sample separately = Fig5.D}
+
+
+kruskal_test <- kruskal.test(infercnv_score ~ Organoid_Type_Cell_Type, data = md)
+
+dunn_test <- md %>% 
+  dunn_test(infercnv_score ~ Organoid_Type_Cell_Type, p.adjust.method = "fdr")
+
+
+counts_per_line_types = md %>%
+  group_by(Organoid_Type_Cell_Type) %>%
+  summarise(
+    count = n(),
+    upper_whisker = quantile(infercnv_score, 0.75) + 1.5 * IQR(infercnv_score))
+
+# Define y positions for significance bars
+y_positions <- c(0.20, 0.25, 0.33, 0.43) 
+
+plot = ggplot(md, aes(y = infercnv_score, x = Organoid_Type_Cell_Type, fill = Organoid_Type_Cell_Type)) +
+  geom_boxplot(lwd = 0.5, width = 0.5, outlier.shape = NA) +
+  scale_fill_manual(values = pal_line_type) +
+  geom_signif(comparisons = list(
+    c("Early_Passage_PDOs_Basal/Hillock", "Early_Passage_PDOs_Club"), 
+    c("Early_Passage_PDOs_Club", "Early_Passage_PDOs_Transitioning"), 
+    c("Early_Passage_PDOs_Transitioning","Early_Passage_PDOs_Tumor"),
+    c("Early_Passage_PDOs_Tumor","Long_Term_PDOs_Tumor")), 
+    map_signif_level = TRUE, y_position = y_positions) +
+  ylim(c(0, 0.5)) +
+  labs(title = "CNV_score in early-passaged tunor cells vs long term lines",
+       x = NULL,
+       y = "Infer_CNV_scores") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), # Tilt x-axis annotations
+        plot.title = element_text(size = 8),
+        legend.position = "none") 
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_BoxPlots_Sample_Name_Cell_Type_Merged.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 6)
+
+```
+
+```{r Box plot of infer_cnv scores, Wilcoxon + Bonferroni method}
+
+# To perform wilcoxon data should be simitrically distributed arround the median (~ok here)
+md_long = md %>%
+  pivot_longer(cols = contains("score"),names_to = "score_name", values_to = "score_values")
+
+ggdensity(md_long, x = "score_values", rug = TRUE, fill = "lightgray") +
+  stat_central_tendency(type = "median", color = "red", linetype = "dashed") +
+  facet_wrap(~Organoid_Type_Cell_Type)
+
+# To avoid increasing type 1 error (FALSE positive cases) reduce the number of comparisons 
+# Here 1-(1-0.05)^4 = 18% (still high)
+
+comparisons <- list(
+  c("Early_Passage_PDOs_Basal/Hillock", "Early_Passage_PDOs_Club"), 
+  c("Early_Passage_PDOs_Club", "Early_Passage_PDOs_Transitioning"), 
+  c("Early_Passage_PDOs_Transitioning","Early_Passage_PDOs_Tumor"),
+  c("Early_Passage_PDOs_Tumor","Long_Term_PDOs_Tumor")
+)
+
+# Run Wilcoxon test for each pair 
+pval_table <- purrr::map_dfr(comparisons, function(comp) {
+  test <- wilcox.test(
+    infercnv_score ~ Organoid_Type_Cell_Type,
+    data = md %>% filter(Organoid_Type_Cell_Type %in% comp)
+  )
+  data.frame(
+    group1 = comp[1],
+    group2 = comp[2],
+    p = test$p.value
+  )
+})
+
+# Apply Bonferroni correction (conservative way to recalculate thresholds of significance)
+pval_table$p.adj <- p.adjust(pval_table$p, method = "bonferroni")
+
+# Set y.position dynamically
+max_y <- max(md$infercnv_score, na.rm = TRUE)
+pval_table$y.position <- seq(max_y * 1.05, max_y * 1.15, length.out = nrow(pval_table))
+
+# Optional: Add formatted significance labels
+pval_table$p.adj.signif <- cut(pval_table$p.adj,
+  breaks = c(-Inf, 0.001, 0.01, 0.05, Inf),
+  labels = c("***", "**", "*", "ns")
+)
+
+# Step 5: Plot with stat_pvalue_manual
+plot <- ggplot(data = md, aes(y = infercnv_score, x = Organoid_Type_Cell_Type, fill = Organoid_Type_Cell_Type)) +
+  geom_boxplot(lwd = 0.5, width = 0.5, outlier.shape = NA) +
+  scale_fill_manual(values = pal_line_type) +
+  stat_pvalue_manual(
+    data = pval_table,
+    label = "p.adj.signif",     # or use "p.adj" for numeric values
+    y.position = "y.position",
+    xmin = "group1",
+    xmax = "group2",
+    tip.length = 0.01
+  ) +
+  ylim(c(0, 0.5)) +
+  labs(
+    title = "CNV_score in early-passaged tumor cells vs long-term lines",
+    x = NULL,
+    y = "Infer_CNV_scores"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 8),
+    legend.position = "none"
+  )
+
+print(plot)
+
+```
+
+
+```{r Box plot of infer_cnv scores for each CLM sample separately}
+
+md_early_passage = md %>%
+  filter(grepl(x = Organoid_Type, "Early_Passage")) 
+
+plot_list = list()
+i = 1
+
+update_geom_defaults("text", list(size = 2))
+
+for (sample in unique(md_early_passage$Sample_Name)) {
+  
+  
+  # Make a sub_df with a single sample
+  md_sub = md_early_passage %>%
+    filter(Sample_Name == sample) 
+  
+  # Make a df with the counts per Cell_Type
+  # Compute the location of the upper tip of the box plot to position text
+  counts_per_Cell_Type = md_sub %>%
+    group_by(Cell_Type) %>%
+    summarise(
+      count = n(),
+      upper_whisker = quantile(infercnv_score, 0.75) + 1.5 * IQR(infercnv_score)) 
+  
+  # Define y positions for significance bars
+  y_positions <- c(max(counts_per_Cell_Type$upper_whisker) + 0.1, 
+                   max(counts_per_Cell_Type$upper_whisker) + 0.15,
+                   max(counts_per_Cell_Type$upper_whisker) + 0.20,
+                   max(counts_per_Cell_Type$upper_whisker) + 0.25) 
+  
+  # Check if there are at least two groups with data
+  # If only one, no statistic comparison will be done
+  available_groups <- unique(md_sub$Cell_Type)
+  
+  if (length(available_groups) < 2) {
+    next
+  }
+  
+  # If at least or more than 2
+  # Generate comparisons based on available groups
+  comparisons <- list()
+  if ("Basal/Hillock" %in% available_groups && "Club" %in% available_groups) {
+    comparisons <- append(comparisons, list(c("Basal/Hillock", "Club")))
+  }
+  if ("Club" %in% available_groups && "Transitioning" %in% available_groups) {
+    comparisons <- append(comparisons, list(c("Club", "Transitioning")))
+  }
+  if ("Basal/Hillock" %in% available_groups && "Tumor" %in% available_groups) {
+    comparisons <- append(comparisons, list(c("Basal/Hillock", "Tumor")))
+  }
+  if ("Transitioning" %in% available_groups && "Tumor" %in% available_groups) {
+    comparisons <- append(comparisons, list(c("Transitioning", "Tumor")))
+  }
+  
+  
+  # Plot the data with reordered factor levels
+  plot = ggplot(md_sub, aes(x = Cell_Type, y = infercnv_score, fill = Cell_Type)) +
+    geom_boxplot(varwidth = F, outlier.shape = NA) +
+    ylim(c(0,0.6)) +
+    scale_fill_manual(values = pal_cell_type) + # Use the custom palette
+    labs(title = sample,
+         x = NULL,
+         y = "Infer_CNV_scores") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), # Tilt x-axis annotations
+          legend.position = "none",
+          plot.title = element_text(size = 8)) + 
+    geom_signif(comparisons = comparisons, # List of comparison that have to be done (define above)
+                map_signif_level = TRUE, 
+                y_position = y_positions) + # Position of the bars
+    geom_text(data = counts_per_Cell_Type, 
+              aes(
+                x = Cell_Type, y = upper_whisker, # Position of the text
+                label = paste0("n = ",count), 
+                angle = 90, vjust = 0.4, hjust = -0.2)
+    ) 
+  
+  plot_list[[i]] = plot
+  
+  i = i + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 3, ncol = 4,
+  layout_matrix = rbind(
+    c(1,2,3,4), 
+    c(5,6,7,8), 
+    c(9,10,11,12))
+)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_BoxPlots_Sample_Name_Cell_Type_early_passage_lines.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r UMAP CNV+/- (Removed after review)}
+
+md$infercnv_score_logical = ifelse(
+  test = md$infercnv_score >= 0.10, 
+  yes = "CNV_pos", 
+  no = "CNV_neg")
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md,
+      aes(x = UMAP_1, y = UMAP_2, fill = infercnv_score_logical), 
+      alpha = 0.5, size = 2, 
+      shape = 21,
+      color = "gray10"),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+    dpi = 200, scale = 0.4) +
+  scale_fill_manual(values = c("CNV_pos" = "#F69541", "CNV_neg" = "#72A6CE")) +
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none"
+  )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Single_Infer_CNv_logical.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8,
+)
+
+table(md$Cell_Type,md$infercnv_score_logical)
+
+
+```
+
+```{r UMAP infer_CNV continuous mean in hexagons Fig5.E}
+
+plot = ggplot(md, aes(x = UMAP_1, y = UMAP_2, z = infercnv_score)) +
+  stat_summary_hex(
+    fun = mean,
+    bins = 100,
+  ) +
+  scale_fill_gradientn(
+    colours = viridis::viridis(100),
+    limits = c(0, 0.3),
+    breaks = c(0, 0.1, 0.2, 0.3),  # Explicit legend ticks
+    name = "infercnv_score"
+  ) +
+  # coord_fixed() +
+  theme_classic() 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Single_Infer_CNV_Hex.pdf"),
+  device = "pdf",
+  width = 7,
+  height = 6
+)
+
+
+```
+
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_infer_cnv_scored.rds"))
+
+```

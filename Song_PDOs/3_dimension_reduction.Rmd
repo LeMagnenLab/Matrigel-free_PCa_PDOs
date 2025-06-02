@@ -1,0 +1,311 @@
+---
+title: "3.Song 2022 (PDOs): dimension reduction"
+author: "Romuald Parmentier"
+date: "2024-09-23"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+library(scran)
+library(scater)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "Song_PDOs",
+  exp = "3_dimension_reduction"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_PDOs",
+  prev_exp = "2_normalization_rescaling",
+  pattern = "sce_comb_normalized_rescaled.rds")
+
+sce_comb = readRDS(file_path)
+
+# Load list of reacled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_PDOs",
+  prev_exp = "2_normalization_rescaling",
+  pattern = "list_sce_normalized_rescaled.rds")
+
+list_sce = readRDS(file_path)
+
+```
+
+# Select variable genes
+
+```{r variance modeling for the entire batch}
+
+list_var_model = list()
+sce_id = 1
+
+for(sce in list_sce){
+  
+  var_model = modelGeneVar(sce)
+  
+  list_var_model[[sce_id]] = var_model
+  
+  sce_id = sce_id + 1
+}
+
+combined_var_model <- combineVar(unlist(list_var_model))
+chosen.hvgs <- getTopHVGs(combined_var_model, n = 1000)
+
+```
+
+# Batch correction
+
+```{r}
+
+fmnn.out <- suppressWarnings(batchelor::fastMNN( 
+  list_sce,
+  subset.row = chosen.hvgs, # Correction perfromed on top 1000 hvg genes only
+  k = 300, # Number of nearest neighbors (higher the smoother the correction is)
+  d = 20) )# Number of dimension to retain
+
+#  Store the MNN Values in the reducedDim slot of the combined object
+reducedDim(sce_comb, "MNN.1-20") <- reducedDim(fmnn.out)
+
+```
+
+```{r Visualize FMNN loadings}
+
+# Export fmnn loadings
+fmnn_loadings = as_tibble(rowData(fmnn.out)$"rotation")
+rownames(fmnn_loadings) = rownames(fmnn.out)
+
+# Make a tibble out of mnn loadings
+MNN_loadings_df = as_tibble(fmnn_loadings)
+colnames(MNN_loadings_df) = paste0("MNN", 1:ncol(fmnn_loadings))
+rownames(MNN_loadings_df) = rownames(fmnn_loadings)
+
+# Reshape from wide to long format
+MNN_loadings_df_long <- MNN_loadings_df %>%
+  mutate(gene = rownames(MNN_loadings_df)) %>%
+  tidyr::pivot_longer(cols = -gene, names_to = "MNNs", values_to = "Loading")
+
+# Calculate absolute values and arrange in descending order
+top_MNN_loadings <- MNN_loadings_df_long %>%
+  mutate(abs_loadings = abs(Loading)) %>%
+  group_by(MNNs) %>%
+  arrange(desc(abs_loadings)) %>%
+  slice_head(n = 20)   
+
+###################################
+### Plot 20 first MNNS loadings ####
+###################################
+
+plot_list = list()
+MNN_id = 1
+
+MNNs = paste0("MNN", 1:20)
+
+for(MNN in MNNs){
+  
+  top_MNN_loadings_subset = top_MNN_loadings %>%
+    dplyr::filter(MNNs == MNN) %>%
+    mutate(gene = factor(gene, levels = gene[order(abs_loadings, decreasing = F)]))  # Set factor levels based on decreasong order of loadings
+  
+  # Create a bar plot for top fmnn loadings, separated by principal components
+  plot = ggplot(top_MNN_loadings_subset, aes(x = Loading , y = gene)) +  # 'gene' should be the identifier for rows/features
+    geom_col() +
+    labs(title = paste0("Top 20 loadings for MNN", MNN_id),
+         x = "Absolute Loading",
+         y = "Gene") +
+    theme_minimal() 
+  
+  plot_list[[MNN_id]] = plot
+  MNN_id = MNN_id + 1
+  
+}
+
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 3, ncol = 3)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plot_MNN_1-20_loadings.pdf"),
+  device = "pdf",
+  height = 12,
+  width = 10
+)
+
+```
+
+```{r Choosing MNNs according loadings }
+
+### Check how much the two first PCs are capturing sequencing depth (If ~1, then remove it)
+##########################################################################################
+
+MNN = reducedDim(sce_comb, "MNN.1-20")
+
+# Store depth as the sum of counts for each cell (2 = sum of rows)
+depth <- apply(counts(sce_comb), 2, sum)
+
+paste("Correlation between MNN1 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,1], depth)), digits = 2))
+
+paste("Correlation between MNN2 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,2], depth)), digits = 2))
+
+paste("Correlation between MNN3 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,3], depth)), digits = 2))
+
+paste("Correlation between MNN4 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,4], depth)), digits = 2))
+
+```
+
+# Uniform Manifold Approximation and Projection (UMAP) 
+
+## Perform UMAP
+
+```{r Run UMAP}
+
+sce_comb <- runUMAP(
+  sce_comb,
+  dimred = "MNN.1-20",
+  name = "UMAP_on_MNN.1-20",
+  n_neighbors = 300,
+  min_dist = 0.7)
+
+# Set default UMAP reduced dim slot
+reducedDim(sce_comb,"UMAP") = reducedDim(sce_comb,"UMAP_on_MNN.1-20")
+
+```
+
+## Visualize distribution of cells on UMAP
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Facetted UMAP colored per sample}
+
+# Define a color palette for Sample_Description
+sample_colors <- setNames(
+  scales::hue_pal()(length(unique(md$Sample_Description))),
+  unique(md$Sample_Description)
+)
+
+sample_id = 1
+plot_list = list()
+
+for (sample in unique(md$Sample_Description)) {
+  
+  md_other <- subset(md, Sample_Description != sample)
+  md_sample <- subset(md, Sample_Description == sample)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9,shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_sample,
+        aes(x = UMAP_1, y = UMAP_2, fill = Sample_Description), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2 
+      ), dpi = 200, scale = 0.6
+    ) +
+    scale_fill_manual(values = sample_colors) +  # Apply the custom color palette
+    ggtitle(label = sample,
+            subtitle = "Batch Correction (FastMNN applied)" ) +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Sample.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+```
+
+```{r Quick gene expression visualization}
+
+# Feaature plots
+plotUMAP(object = sce_comb,colour_by = "KRT5")
+plotUMAP(object = sce_comb,colour_by = "KRT19")
+plotUMAP(object = sce_comb,colour_by = "KLK3")
+plotUMAP(object = sce_comb,colour_by = "PIGR")
+plotUMAP(object = sce_comb,colour_by = "OLFM4")
+
+# Violin plot
+plotExpression(
+  sce_comb, 
+  features = c("KRT5", "KRT19", "PIGR","LTF","AMACR","KLK3"),
+  x = "Sample_Description", # Split by SampleDescription
+  colour_by = "Sample_Description",  # Color points by SampleDescription
+  show_smooth = TRUE) + 
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)
+  )
+
+```
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_dim_reduced.rds"))
+
+```

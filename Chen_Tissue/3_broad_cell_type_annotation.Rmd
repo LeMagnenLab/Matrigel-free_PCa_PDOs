@@ -1,0 +1,113 @@
+---
+title: "3.Chen 2021 (Tumor Tissue): broad cell type annotation"
+author: "Romuald Parmentier"
+date: "2024-10-28"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(SingleR) # Cell type annotation
+library(celldex)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  exp = "3_broad_cell_type_annotation"
+)
+
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load rescaled atlas sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "sce_comb_normalized_rescaled.rds")
+
+sce_comb = readRDS(file = file_path) 
+
+# Load BlueprintEncodeData ref for broad cell type assignation
+file_path = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/data/BlueprintEncodeData/BlueprintEncodeData.rds"
+
+Blueprint_ref = readRDS(file = file_path) 
+
+# Load celltype_ref_sce object from Hirz 2022
+####################################
+
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  prev_exp = "annotate_harmonize_normalize_sce", 
+  pattern = "sce_comb_QuickClustered_MultiBatch_normed.rds")
+
+print(file_path)
+hirz_ref = readRDS(file = file_path) 
+
+```
+
+# Broad cell type annotation
+
+```{r}
+
+# Compute the prediction
+pred_type <- SingleR(
+  test = sce_comb, 
+  ref = Blueprint_ref, 
+  labels = Blueprint_ref$label.main)
+
+# Assign braod cell types to tissues
+sce_comb$broad_type_Blueprint = pred_type$pruned.labels
+
+table(sce_comb$Sample_Description, sce_comb$broad_type_Blueprint)
+
+```
+
+# Annotation according Hirz_2022 dataset
+
+```{r}
+
+hirz_ref = hirz_ref[, sample(ncol(hirz_ref), size = ncol(sce_comb), replace = FALSE)]
+gc()
+
+pred_broad <- SingleR(
+  test = sce_comb, 
+  ref = hirz_ref, 
+  labels = hirz_ref$cell_type_broad)
+
+# Adding the cell type is done on the origianl sce object so that the genes removed during the restrcit rowDt step are back
+sce_comb$broad_type_Hirz = pred_broad$pruned.labels
+
+```
+
+
+# Visualization 
+
+No visualization here as the dimension redution has not been performed yet. 
+==> This is was wanted as we wanted to perform dimension reduction in parallel for both epithelial only and all cell type. Thus cell type assignation had to be perfroned beforehand.
+
+# Export files
+
+```{r Export sce_comb object}
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_broad_cell_type_annotated.rds"))
+
+```

@@ -1,0 +1,300 @@
+---
+title: '4.Atlas PCa PDOS (Dolgos, Huang, Song, McCray): Cell type annotation'
+author: "Romuald Parmentier"
+date: "2024-10-11"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(SingleR) 
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  exp = "4_cell_type_annotation"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load rescaled atlas sce object after dimension reduction
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "3_dimension_reduction", 
+  pattern = "sce_comb_dim_reduced.rds")
+
+print(file_path)
+sce_comb = readRDS(file = file_path) 
+
+# Load Dolgos_early passage sce object after clustering and Cell_Type assignation
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_Early",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered.rds")
+
+print(file_path)
+sce_comb_ref = readRDS(file = file_path) 
+
+print(out_path)
+
+```
+
+```{r Restrict sce object to published datasets}
+
+# Restrict all_datasets sce object to Huang/Song/McCray as only those cells will be assigned thanks to singleR
+
+indices = grep(
+  x = sce_comb$Dataset,
+  pattern = "Huang_2023|Song_2022|McCray_2019")
+
+sce_comb_published = sce_comb[,indices]
+
+```
+
+# Cell_Type assignation 
+
+```{r Automatic assignation with SingleR}
+
+# Make a list with the ref and the test and restrict the features of the ref sce
+list_sce_ref_test = restrict_reorder_features_names(list(sce_comb_ref, sce_comb_published))
+
+sce_comb_ref = list_sce_ref_test[[1]]
+sce_comb_published = list_sce_ref_test[[2]]
+
+# Predict on all dataset combined object
+pred_Cell_Type <- SingleR(
+  test = sce_comb_published, 
+  ref = sce_comb_ref, 
+  assay.type.test = "logcounts",
+  assay.type.ref = "logcounts" ,
+  labels = sce_comb_ref$Cell_Type, 
+  de.method = "wilcox")
+
+```
+
+```{r Manual assignation of predicted Cell_Type}
+
+sce_comb$Cell_Type = "TBD"
+
+# Assign predicted Cell_Type to published dataset cells
+indices = which(colnames(sce_comb) %in% colnames(sce_comb_published))
+sce_comb$Cell_Type[indices] = pred_Cell_Type$pruned.labels
+
+# Assign Cell_Type to Dolgos_early_passage cells according to the Cell_Type already given beforehand
+indices = which(colnames(sce_comb) %in% colnames(sce_comb_ref))
+sce_comb$Cell_Type[indices] = sce_comb_ref$Cell_Type
+
+# Assign Cell_Type = tumor for stable lines MSK, P20-11, P20-23
+sce_comb$Cell_Type = ifelse(
+  test = grepl(x = sce_comb$Sample_Name, pattern = "P20-11|P20-23|MSK"),
+  yes = "Tumor",
+  no = sce_comb$Cell_Type
+)
+
+```
+
+# Visualizaion 
+
+```{r Export metadata as tibble}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Further categorize metadata df}
+
+# Remove cells categorized as "other" = 298, scattered all over the plot, not significant
+# md = md %>% 
+#   dplyr::filter(Cell_Type != "Other")
+
+# Categorize the datasets
+md$Dataset_Organoids_Line_Type = paste0(md$Dataset,"_", md$Organoid_Line_Type)
+
+# Transform Cell_Type to a factor with ordered levels
+md$Cell_Type = factor(x = md$Cell_Type, levels = c("Tumor", "Club", "Transitioning", "Basal/Hillock", "Other"))
+
+```
+
+```{r Count and percentage per cells for all Cell_Type for pie chart}
+
+# Count cell per Cell_Type per sample (drop =F add 0 where n observations)
+md_count <- md %>%
+  group_by(Dataset_Organoids_Line_Type, Organoid_Culture_Condition, Sample_Name, Cell_Type, .drop = F) %>% 
+  summarise(count = n()) 
+
+# PCT of cell per Cell_Type per sample
+md_percentage = md_count %>%
+  ungroup() %>%
+  group_by(Dataset_Organoids_Line_Type, Organoid_Culture_Condition,  Sample_Name) %>%
+  mutate(percentage = round(count / sum(count) * 100, 1))
+
+```
+
+```{r Count & percentage of Cell_Type for tumor vs non-tumor Cell_Type = Fig5.E upper pie charts}
+
+# Calculate the percentage of Tumot Cell_Type for each sample
+tumor_percentage = md_percentage %>%
+  dplyr::filter(
+    Cell_Type == "Tumor",
+    Dataset_Organoids_Line_Type != "Dolgos_2024_Long_Term_PDOs") %>%
+  rename(pct.tumor = "percentage") %>%
+  mutate(pct.other = 100 - pct.tumor)
+
+tumor_percentage = tumor_percentage %>%
+  group_by(Dataset_Organoids_Line_Type, Organoid_Culture_Condition) %>%
+  summarise(
+    mean_tumor = round(mean(pct.tumor),1),
+    mean_other = round(mean(pct.other),1))
+
+write.csv(
+  x = tumor_percentage,
+  file = paste0(out_path,time_stamp(),"table_tumor_pct_sample.csv"))
+
+```
+
+```{r Count & percentage of Cell_Type for non-tumor Cell_Type = Fig5.E lower pie charts}
+
+# Calculate the percentage of non-tumor Cell_Type for each sample
+non_tumor_percentage = md_count %>%
+  dplyr::filter(
+    Cell_Type != "Tumor", 
+    Dataset_Organoids_Line_Type != "Dolgos_2024_Long_Term_PDOs") %>%
+  group_by(Dataset_Organoids_Line_Type, Organoid_Culture_Condition,  Sample_Name) %>%
+  mutate(percentage = round(count / sum(count) * 100, 1))
+
+# Calculate the mean percentage of non-tumor accross samples
+non_tumor_percentage = non_tumor_percentage %>%
+  group_by(Dataset_Organoids_Line_Type, Organoid_Culture_Condition, Cell_Type) %>%
+  summarise(mean = round(mean(percentage),1))
+
+# Remove Tumor and Other (came back in the tab as Cell_Type is a factor, but they are = 0)
+non_tumor_percentage = non_tumor_percentage %>%
+  dplyr::filter(!(Cell_Type %in% c("Tumor","Other")))
+
+write.csv(
+  x = non_tumor_percentage,
+  file = paste0(out_path,time_stamp(),"table_non-tumor_pct_sample.csv"))
+
+```
+
+```{r Facetted UMAP colored per sample}
+
+sample_id = 1
+plot_list = list()
+
+for (Type in unique(md$Cell_Type)) {
+  
+  md_other <- subset(md, Cell_Type != Type)
+  md_Cell_Type <- subset(md, Cell_Type == Type)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 1, color = "grey10", shape = 21),
+      dpi = 100, scale = 0.3
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_Cell_Type,
+        aes(x = UMAP_1, y = UMAP_2, fill = Cell_Type), 
+        alpha = 0.8, size = 2.5, color = "grey10", shape = 21),
+      dpi = 100, scale = 0.3
+    ) +
+    scale_fill_manual(values = pal_cell_type) +
+    theme_classic() +
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Cell_Type.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r Single UMAP colored Organoid Line Type = Fig5.A}
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md,
+      aes(x = UMAP_1, y = UMAP_2, fill = Cell_Type), 
+      alpha = 0.5, size = 2, 
+      shape = 21,
+      color = "gray10"),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+    dpi = 200, scale = 0.4) +
+  scale_fill_manual(values = pal_cell_type) +
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none"
+  )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Single_Cell_Type.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8,
+)
+
+```
+
+
+
+# Export files
+
+```{r Export sce_comb object}
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_cell_type_annotated.rds"))
+
+```
+
+

@@ -1,0 +1,243 @@
+---
+title: 'Hirz_2022 : dimension reduction'
+author: "Romuald Parmentier"
+date: "2024-11-15"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+library(scran)
+library(scater)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Color_Palettes.R")
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  exp = "dimension_reduction"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  prev_exp = "normalization_rescaling",
+  pattern = "sce_comb_normalized_rescaled.rds")
+
+sce_comb = readRDS(file_path)
+
+# Load UMAP original coordinates
+umap_coord <- list.files(
+  path = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Pre_Processed_Data/Hirz_2022", 
+  pattern = "UMAP_Coordinates.csv",
+  full.names = T)
+
+umap_coord = read.csv(umap_coord)
+
+```
+
+# Using published dimension reduction
+
+```{r Restrict the cells to the ones with coordinates in UMAP}
+
+# Subset `sce_comb` to include only the cells present in `umap_coord$X`
+sce_comb <- sce_comb[, colnames(sce_comb) %in% umap_coord$X]
+
+# Subset `umap_coord` to include only the cells present in `sce_comb`
+umap_coord <- umap_coord[umap_coord$X %in% colnames(sce_comb), ]
+
+# Reorder `umap_coord` to match the order of columns in `sce_comb`
+umap_coord <- umap_coord[match(colnames(sce_comb), umap_coord$X), ]
+
+# Set row names of `umap_coord` and update `reducedDims`
+rownames(umap_coord) <- umap_coord$X
+reducedDims(sce_comb)[["published_UMAP"]] <- umap_coord[, c("UMAP.1", "UMAP.2")]
+
+```
+
+# Visualization 
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "published_UMAP"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Facetted UMAP colored per sample}
+
+sample_id = 1
+plot_list = list()
+
+for (sample in unique(md$Sample_ID)) {
+  
+  md_other <- subset(md, Sample_ID != sample)
+  md_sample <- subset(md, Sample_ID == sample)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9,shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_sample,
+        aes(x = UMAP_1, y = UMAP_2, fill = Sample_ID), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2 
+      ), dpi = 200, scale = 0.6
+    ) +
+    scale_fill_manual(values = pal_Hirz_Sample_ID) +  # Apply the custom color palette
+    ggtitle(label = sample,
+            subtitle = "Published UMAP coordinates" ) +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Sample.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+```
+
+```{r Facetted UMAP colored per broad cell type}
+
+cell_type_id = 1
+plot_list = list()
+
+md$cell_type_broad = as.character(md$cell_type_broad)
+
+for (type in unique(md$cell_type_broad)) {
+  
+  md_other <- md %>% dplyr::filter(cell_type_broad != type)
+  md_cell_type <- md %>% dplyr::filter(cell_type_broad == type)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9, shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_cell_type,
+        aes(x = UMAP_1, y = UMAP_2, fill = cell_type_broad), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2
+      ), dpi = 200, scale = 0.6
+    ) +
+    scale_fill_manual(values = pal_Hirz_broad_cell_type) +  # Apply the custom color palette
+    ggtitle(label = type,
+            subtitle = "Published UMAP coordinates") +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[cell_type_id]] = plot
+  
+  cell_type_id = cell_type_id + 1
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(), "plots_UMAP_Facetted_CellType.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+# Do the same with Gleason, Cell Type, Grade
+
+```{r Quick gene expression visualization}
+
+reducedDim(sce_comb, "UMAP") = reducedDim(sce_comb, "published_UMAP")
+
+# Feaature plots
+plotUMAP(object = sce_comb,colour_by = "KRT5")
+plotUMAP(object = sce_comb,colour_by = "KRT19")
+plotUMAP(object = sce_comb,colour_by = "KLK3")
+plotUMAP(object = sce_comb,colour_by = "PIGR")
+plotUMAP(object = sce_comb,colour_by = "OLFM4")
+
+# Violin plot
+plotExpression(
+  sce_comb, 
+  features = c("KRT5", "KRT19", "PIGR","LTF","AMACR","KLK3"),
+  x = "Gleason", # Split by SampleDescription
+  colour_by = "Gleason",  # Color points by SampleDescription
+  show_smooth = TRUE) + 
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)
+  )
+
+```
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_dim_reduced.rds"))
+
+```

@@ -1,0 +1,216 @@
+---
+title: "IF Pliots"
+author: "Romuald Parmentier"
+date: "2025-05-19"
+output: html_document
+---
+
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+
+library(dplyr)
+library(ggplot2)
+library(ggsignif)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  exp = "10_IF_pannels"
+)
+
+```
+
+
+```{r}
+
+If_df = read.delim(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/Dolgos_2024/bin/IF_Plot/IF.txt")
+If_df$Source = rep(x = c("Parental","PDOs"), nrow(If_df)/2)
+If_df = pivot_longer(data = If_df, cols = c("AMACR","CK8","MUC5AC"), values_to = "Intensity", names_to = "Marker")
+
+# Wilcoxon paired test by marker
+pvals_1 <- If_df %>%
+  group_by(Marker) %>%
+  summarise(
+    p = wilcox.test(
+      x = Intensity[Source == "Parental"],
+      y = Intensity[Source == "PDOs"],
+      paired = TRUE,
+      exact = FALSE
+    )$p.value,
+    .groups = "drop"
+  )
+
+# Get max intensity per Marker to position p-values above data
+y_positions <- If_df %>%
+  group_by(Marker) %>%
+  summarise(y.position = max(Intensity, na.rm = TRUE) * 1.05)
+
+# Prepare p-value table for stat_pvalue_manual
+pval_table <- pvals_1 %>%
+  mutate(group1 = "Parental",
+         group2 = "PDOs") %>%
+  left_join(y_positions, by = "Marker") %>%
+  rename(p.adj = p)
+
+# Final plot with stat_pvalue_manual
+plot <- ggplot(If_df, aes(x = Source, y = Intensity, group = Patient)) +
+  geom_boxplot(aes(group = Source), outlier.shape = NA, fill = "grey90", color = "black") +
+  geom_point(aes(color = Patient), position = position_dodge(width = 0.2), size = 2) +
+  facet_wrap(~ Marker) +
+  stat_pvalue_manual(
+    data = pval_table,
+    label = "p.adj",
+    xmin = "group1",
+    xmax = "group2",
+    y.position = "y.position",
+    tip.length = 0.01,
+    size = 3
+  ) +
+  ylim(c(0, 100)) +
+  theme_minimal() +
+  labs(x = "Source", y = "Intensity", title = "Marker intensity across sources by patient")
+
+# Save plot
+ggsave(
+  plot = plot,
+  filename = paste0(out_path, time_stamp(), "plots_IF_pannel_1.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 4
+)
+
+####
+
+If_df = read.delim(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/Dolgos_2024/bin/IF_Plot/IF_2.txt")
+If_df$Source = rep(x = c("Parental","PDOs"), nrow(If_df)/2)
+If_df = pivot_longer(data = If_df, cols = c("CK5","CK8","OLFM4"), values_to = "Intensity", names_to = "Marker")
+
+# Wilcoxon paired test by marker
+pvals_1 <- If_df %>%
+  group_by(Marker) %>%
+  summarise(
+    p = wilcox.test(
+      x = Intensity[Source == "Parental"],
+      y = Intensity[Source == "PDOs"],
+      paired = TRUE,
+      exact = FALSE
+    )$p.value,
+    .groups = "drop"
+  )
+
+# Get max intensity per Marker to position p-values above data
+y_positions <- If_df %>%
+  group_by(Marker) %>%
+  summarise(y.position = max(Intensity, na.rm = TRUE) * 1.05)
+
+# Prepare p-value table for stat_pvalue_manual
+pval_table <- pvals_1 %>%
+  mutate(group1 = "Parental",
+         group2 = "PDOs") %>%
+  left_join(y_positions, by = "Marker") %>%
+  rename(p.adj = p)
+
+# Final plot with stat_pvalue_manual
+plot <- ggplot(If_df, aes(x = Source, y = Intensity, group = Patient)) +
+  geom_boxplot(aes(group = Source), outlier.shape = NA, fill = "grey90", color = "black") +
+  geom_point(aes(color = Patient), position = position_dodge(width = 0.2), size = 2) +
+  facet_wrap(~ Marker) +
+  stat_pvalue_manual(
+    data = pval_table,
+    label = "p.adj",
+    xmin = "group1",
+    xmax = "group2",
+    y.position = "y.position",
+    tip.length = 0.01,
+    size = 3
+  ) +
+  ylim(c(0, 100)) +
+  theme_minimal() +
+  labs(x = "Source", y = "Intensity", title = "Marker intensity across sources by patient")
+
+# Save plot
+ggsave(
+  plot = plot,
+  filename = paste0(out_path, time_stamp(), "plots_IF_pannel_2.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 4
+)
+
+```
+
+
+
+```{r}
+
+# Load data
+If_df <- read.delim(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/Dolgos_2024/bin/IF_Plot/IF.txt")
+
+# Add condition labels
+If_df$Source <- rep(c("Parental", "PDOs"), nrow(If_df) / 2)
+
+# Convert to long format
+If_df <- pivot_longer(data = If_df, cols = c("MUC5AC", "CK8", "AMACR"),
+                      values_to = "Intensity", names_to = "Marker")
+
+# Wilcoxon paired test by marker
+pvals_1 <- If_df %>%
+  group_by(Marker) %>%
+  summarise(
+    p = wilcox.test(
+      x = Intensity[Source == "Parental"],
+      y = Intensity[Source == "PDOs"],
+      paired = TRUE,
+      exact = FALSE
+    )$p.value,
+    .groups = "drop"
+  )
+
+# Get max intensity per Marker to position p-values above data
+y_positions <- If_df %>%
+  group_by(Marker) %>%
+  summarise(y.position = max(Intensity, na.rm = TRUE) * 1.05)
+
+# Prepare p-value table for stat_pvalue_manual
+pval_table <- pvals_1 %>%
+  mutate(group1 = "Parental",
+         group2 = "PDOs") %>%
+  left_join(y_positions, by = "Marker") %>%
+  rename(p.adj = p)
+
+# Final plot with stat_pvalue_manual
+plot <- ggplot(If_df, aes(x = Source, y = Intensity, group = Patient)) +
+  geom_boxplot(aes(group = Source), outlier.shape = NA, fill = "grey90", color = "black") +
+  geom_point(aes(color = Patient), position = position_dodge(width = 0.2), size = 2) +
+  facet_wrap(~ Marker) +
+  stat_pvalue_manual(
+    data = pval_table,
+    label = "p.adj",
+    xmin = "group1",
+    xmax = "group2",
+    y.position = "y.position",
+    tip.length = 0.01,
+    size = 3
+  ) +
+  ylim(c(0, 100)) +
+  theme_minimal() +
+  labs(x = "Source", y = "Intensity", title = "Marker intensity across sources by patient")
+
+# Save plot
+ggsave(
+  plot = plot,
+  filename = paste0(out_path, time_stamp(), "plots_IF_pannel_1.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 4
+)
+
+```
+

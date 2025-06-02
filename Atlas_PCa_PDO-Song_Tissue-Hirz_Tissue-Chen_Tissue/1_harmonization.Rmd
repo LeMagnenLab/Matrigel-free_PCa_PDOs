@@ -1,0 +1,660 @@
+---
+title: '1. Atlas PCa PDOS + tissue (tumor only) from Song, Hirz, Chen dataset: harmonization'
+author: "Romuald Parmentier"
+date: "2024-12-16"
+output: html_document
+---
+
+# Prepare environement 
+
+```{r Clone Github repo and/or point toward its direction}
+
+library(git2r)
+
+# Set the base directory where the repository should be cloned
+base_dir <- "/Users/romuald/Bioinformatics/R_Projects"
+setwd(base_dir)
+
+# Load the git2r package (install if necessary)
+if (!requireNamespace("git2r", quietly = TRUE)) {
+  install.packages("git2r")
+}
+
+# Define the repository URL and the destination directory
+repo_url <- "https://github.com/LeMagnenLab/Matrigel-free_PCa_PDOs.git"
+github_dir <- file.path(base_dir, "Matrigel_Free_Github")
+
+# Check if the repository already exists, clone if necessary
+if (dir.exists(github_dir)) {
+  message("Repository already exists at: ", github_dir)
+} else {
+  message("Cloning the repository into: ", github_dir)
+  git2r::clone(url = repo_url, local_path = github_dir)
+  message("Repository cloned successfully.")
+  message("Github repository cloned in: ", github_dir)
+}
+
+```
+
+```{r Get Zenodo file links}
+
+library("rjson")
+library("purrr")
+
+# Load and read json fron zenodo
+zenodo_json = list.files(github_dir, pattern = "json",full.names = T)
+zenodo_json = fromJSON(paste0(readLines(zenodo_json), collapse = ""))
+
+# Extract entries
+zenodo_json_files <- zenodo_json$files$entries
+
+# Convert to data.frame / tibble
+zenodo_files_df <- tibble::tibble(
+       key = names(zenodo_json_files),
+       mimetype = map_chr(zenodo_json_files, ~ .x$mimetype),
+       url = map_chr(zenodo_json_files, ~ .x$links$content),
+       size = map_dbl(zenodo_json_files, ~ .x$size)
+   )
+
+
+```
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  exp = "1_harmonization"
+)
+
+```
+
+# Load and harmonize all data from different dataset
+
+## Load metadata of all samples included in this atlas
+
+This csv file has been made manually and has been stored in the same folder
+
+```{r Load metadata from atlas}
+
+sce_metadata <- zenodo_files_df %>% 
+  filter(key == "Atlas_PCa_PDOs_metadata.csv") %>% 
+  pull(url) %>% 
+  read.csv()
+
+```
+
+
+## Load PDO atlas to retrieve metadata for all PDO datasets
+
+```{r Load sample metadata}
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "8_final_export", 
+  pattern = "Atlas_PCa_PDOs_sce_final.rds")
+
+Dolgos_Atlas_PDO_sce_comb = readRDS(file_path)
+
+```
+
+### McCray_2019 PDO
+
+```{r Load normalized sce}
+
+## Load the only normalized sce for PDOs
+## Annotation used for this sce is the one computed in Dologos_2024 with SingleR (stored in Dolgos_Atlas_PDO_sce_comb)
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "McCray_PDOs",
+  prev_exp = "2_normalization", 
+  pattern = "sce_normalized.rds")
+
+McCray_sce = readRDS(file_path)
+
+```
+
+```{r Structuring samples metadata}
+
+# Filter for the correct sample
+sce_metadata = samples_metadata %>%
+  filter(Dataset == "McCray_2019")
+
+# Creta the metadta df by replciating the metadata by he number of cells
+sce_metadata = sce_metadata %>%
+  slice(rep(1, ncol(McCray_sce))) 
+
+# Add cell specific sizeFacor column 
+sce_metadata$sizeFactor = McCray_sce$sizeFactor
+
+# Store colnames
+cell_names = colnames(McCray_sce)
+
+# Replace the colData by the new table
+colData(McCray_sce) = DataFrame(sce_metadata)
+colnames(McCray_sce) = cell_names
+
+# Subsetting unwanted cells in the sce
+cells_in_sce =  which(colnames(Dolgos_Atlas_PDO_sce_comb) %in% colnames(McCray_sce))
+McCray_sce$Cell_Type = Dolgos_Atlas_PDO_sce_comb$Cell_Type[cells_in_sce]
+
+# Store the sce in a list for convenience in later steps
+McCray_list_sce = list(McCray_sce)
+names(McCray_list_sce) = unique(McCray_sce$Sample_Original_ID)
+
+```
+
+## Song_2022 PDO and Tissue
+
+```{r Load list of normalized sce objects and annotated combined object}
+
+## Load the list of normalized sce for PDOs 
+## Annotation used for these sce is the one computed in Dologos_2024 with SingleR (stored in Dolgos_Atlas_PDO_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_PDOs",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Song_Org_list_sce = readRDS(file_path)
+
+## Load the list of normalized sce for tissue 
+## Annotation used for these sce is the original one contained in the original object (Song_Tissue_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_Tissue",
+  prev_exp = "1bis_normalization_Rescaling",
+  pattern = "list_sce_normalized.rds")
+
+Song_Tissue_list_sce = readRDS(file_path)
+
+# Load the annotated tissue object with original annotation (epithelial cells only)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_Tissue",
+  prev_exp = "1bis_normalization_Rescaling",
+  pattern = "sce_comb_normalized_rescaled.rds")
+
+Song_Tissue_sce_comb = readRDS(file_path)
+
+```
+
+```{r Structuring samples metadata for PDOs}
+
+Song_Org_list_sce = lapply(X = Song_Org_list_sce, FUN = function(sce){
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Song_2022" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  cells_in_sce =  which(colnames(Dolgos_Atlas_PDO_sce_comb) %in% colnames(sce))
+  sce$Cell_Type = Dolgos_Atlas_PDO_sce_comb$Cell_Type[cells_in_sce]
+  
+  return(sce)
+  
+} )
+
+```
+
+```{r Structuring samples metadata for tissue}
+
+Song_Tissue_list_sce = lapply(X = Song_Tissue_list_sce, FUN = function(sce){
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Song_2022" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  cells_in_sce =  which(colnames(Song_Tissue_sce_comb) %in% colnames(sce))
+  sce$Cell_Type = Song_Tissue_sce_comb$ID[cells_in_sce]
+  
+  return(sce)
+  
+} )
+
+```
+
+# Chen_2022 tissue
+
+```{r Load list of normalized sce objects and annotated combined object}
+
+## Load the list of normalized sce  
+## Annotation used for these sce is the original one contained in the original object (Chen_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Chen_list_sce = readRDS(file_path)
+
+# Load the annotated tissue object with original annotation (all cell types)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  prev_exp = "4bis_dimension_reduction_all_cells", 
+  pattern = "sce_comb_dim_reduced")
+
+Chen_sce_comb = readRDS(file_path)
+
+```
+
+```{r Fix colnames}
+
+# Apply the function to each SingleCellExperiment in the list
+Chen_list_sce <- lapply(Chen_list_sce, function(sce) {
+    
+  # Assign new names
+  colnames(sce) = sub("_", "-", colnames(sce))
+  
+  # Update sce in the list
+  return(sce)  # Return the modified SingleCellExperiment
+  
+})
+
+# change colnames of the sce_conb object
+colnames(Chen_sce_comb) = sub("_", "-", colnames(Chen_sce_comb))
+
+
+```
+
+```{r Structuring samples metadata}
+
+Chen_list_sce = lapply(X = Chen_list_sce, FUN = function(sce){
+  
+  # Subsetting unwanted cells in the sce
+  names_epithelial_cells = colnames(Chen_sce_comb)[which(Chen_sce_comb$broad_type == "Epithelial cells")]
+  
+  sce = sce[, which(colnames(sce) %in% names_epithelial_cells)]
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Chen_2022" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  cells_in_sce =  which(colnames(Chen_sce_comb) %in% colnames(sce))
+  sce$Cell_Type = Chen_sce_comb$broad_type[cells_in_sce]
+  
+  return(sce)
+  
+})
+
+
+```
+
+## Huang_2023 PDO
+
+```{r Load list of normalized sce objects with original annotation}
+
+## Load the list of normalized sce
+## Annotation used for this sce is the one computed in Dologos_2024 with SingleR (stored in Dolgos_Atlas_PDO_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Huang_PDOs",
+  prev_exp = "1_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Huang_list_sce = readRDS(file_path)
+
+```
+
+```{r Structuring samples metadata}
+
+Huang_list_sce = lapply(X = Huang_list_sce, FUN = function(sce){
+  
+  # Subsetting unwanted cells in the sce
+  untreated_cells = which(sce$Treatment == "DHT")
+  sce = sce[,untreated_cells]
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Huang_2023" & Sample_Name == unique(sce$Sample_ID))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  cells_in_sce =  which(colnames(Dolgos_Atlas_PDO_sce_comb) %in% colnames(sce))
+  sce$Cell_Type = Dolgos_Atlas_PDO_sce_comb$Cell_Type[cells_in_sce]
+  
+  return(sce)
+  
+})
+
+```
+
+# Hirz_2023 tissue
+
+```{r Load list of normalized sce objects and combined object with original annotation}
+
+## Load the list of normalized sce  
+## Annotation used for these sce is the original one contained in the original object (Hirz_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Hirz_Tissue",
+  prev_exp = "2_normalization_rescaling",
+  pattern = "list_sce_normalized.rds")
+
+Hirz_list_sce = readRDS(file_path)
+
+# Load the annotated tissue object with original annotation (all cell types)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Hirz_Tissue",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced")
+
+Hirz_sce_comb = readRDS(file_path)
+
+```
+
+```{r Fix colnames}
+
+# Apply the function to each SingleCellExperiment in the list
+Hirz_list_sce <- lapply(Hirz_list_sce, function(sce) {
+  
+  # Make new names by reordering prex and sufix from previous names
+  new_names = sapply(colnames(sce), function(name) {
+    parts <- strsplit(name, "_")[[1]]  # Split the string by "_"
+      suffix <- parts[1]
+      prefix <- sub("-1$", "", parts[2])  # Remove the trailing "-1"
+      paste0(prefix, "-", suffix)  # Concatenate in the desired order
+  })
+    
+  # Assign new names
+  colnames(sce) = new_names
+  
+  # Update sce in the list
+  return(sce)  # Return the modified SingleCellExperiment
+  
+})
+
+
+```
+
+```{r Structuring samples metadata}
+
+Hirz_list_sce = lapply(X = Hirz_list_sce, FUN = function(sce){
+  
+  # Subsetting unwanted cells in the sce
+  names_epithelial_cells = colnames(Hirz_sce_comb)[grepl(x = Hirz_sce_comb$cell_type_broad,pattern = "Epithelial")]
+  
+  sce = sce[, which(colnames(sce) %in% names_epithelial_cells)]
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Hirz_2023" & Sample_Name == unique(sce$Sample_ID))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  cells_in_sce =  which(colnames(Hirz_sce_comb) %in% colnames(sce))
+  sce$Cell_Type = Hirz_sce_comb$cell_type_broad[cells_in_sce]
+  
+  return(sce)
+  
+})
+
+
+```
+
+# Dolgos_2024 PDO & tissue
+
+```{r Load list of normalized sce objects and combined object with original annotation}
+
+## Load the list of normalized sce (PDO and tissue)
+## Annotation used for this sce is the one computed in Dologos_2024 with SingleR (stored in Dolgos_Atlas_PDO_sce_comb)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_All-Dolgos_Tissue_All",
+  prev_exp = "normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Dolgos_list_sce = readRDS(file_path)
+
+# Load the annotated object of the PDO atlas to retrieve cell type of the organoids
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "4_cell_type_annotation", 
+  pattern = "sce_comb_cell_type_annotated.rds")
+
+Dolgos_Atlas_PDO_sce_comb = readRDS(file_path)
+
+# Load the annotated object of the matched Tissue-PDO to retrieve cell type of the tissue
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "4_malignancy_annotation", 
+  pattern = "sce_comb_malignancy_annotated.rds")
+
+Dolgos_Tissue_sce_comb = readRDS(file_path)
+
+
+```
+
+```{r Structuring samples metadata}
+
+Dolgos_list_sce = lapply(X = Dolgos_list_sce, FUN = function(sce){
+  
+  # Get sample name
+  sample_name = unique(sce$Sample_Description)
+  
+  print(sample_name)
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Dolgos_2024" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Store colnames
+  cell_names = colnames(sce)
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  colnames(sce) = cell_names
+  
+  # Subsetting unwanted cells in the sce
+  if(grepl(x = sample_name, pattern = "Mat|ECMf")){ # If sqample is a PDO get the cell type from the TPDO Atlas object
+    cells_in_sce =  which(colnames(Dolgos_Atlas_PDO_sce_comb) %in% colnames(sce))
+    sce$Cell_Type = Dolgos_Atlas_PDO_sce_comb$Cell_Type[cells_in_sce]
+  }else{ # If sample is a Tissue get the cell type from the Tissue sce object
+    cells_in_sce =  which(colnames(Dolgos_Tissue_sce_comb) %in% colnames(sce))
+    sce$Cell_Type = Dolgos_Tissue_sce_comb$Cell_Type[cells_in_sce]
+  }
+  
+  return(sce)
+  
+})
+
+
+```
+
+# Merge all list of sce
+
+```{r Merging all list of sce and cleaning environement}
+
+# Gather all sce_comb in a single list
+list_all_sce = list(
+  Huang_list_sce, McCray_list_sce, Song_Org_list_sce, Dolgos_list_sce, 
+  Chen_list_sce, Song_Tissue_list_sce,Hirz_list_sce)
+
+list_all_sce <- do.call(c, list_all_sce)
+
+rm(
+  Chen_sce_comb, Dolgos_Atlas_PDO_sce_comb, McCray_sce , Song_Tissue_sce_comb, Hirz_sce_comb, Dolgos_Tissue_sce_comb,
+  Huang_list_sce, Chen_list_sce, Dolgos_list_sce, Hirz_list_sce, McCray_list_sce, Song_Org_list_sce, Song_Tissue_list_sce, Dolgos_list_sce
+  )
+
+gc()
+
+```
+
+# Harmonizing col/rownames col/rowData
+
+```{r Harmonizing count matrix rownames and colnames}
+
+##############################
+### rownames (= features) ###
+#############################
+
+list_all_sce_restricted = restrict_reorder_features_names(sce_list = list_all_sce)
+
+# list_all_sce_extended = extend_and_reorder_SCE(sce_list = list_all_sce)
+
+##################################
+### colnames (= cell barcodes) ###
+##################################
+
+# Check colnames of the matrix (normally done in previous steps)
+lapply(list_all_sce_restricted, function(x){head(colnames(x))})
+
+```
+
+```{r Harmonizing rowData and coldata}
+
+###############
+### RowData ###
+###############
+
+# Identify the common rowData columns across all SCE objects
+common_columns <- Reduce(intersect, lapply(list_all_sce_restricted, function(sce) colnames(rowData(sce))))
+
+# Update each SCE object to retain only the common rowData columns
+list_all_sce_restricted <- lapply(list_all_sce_restricted, function(sce) {
+  rowData(sce) <- rowData(sce)[, common_columns, drop = FALSE]  # Subset rowData
+  return(sce)  # Return updated sce
+})
+
+# Check colnames of the rowData (performed above)
+lapply(list_all_sce_restricted, function(x){colnames(rowData(x))})
+
+###############
+## ColData ###
+##############
+
+# Check colnames of the colData (normally done in previous steps)
+lapply(list_all_sce_restricted, function(x){colnames(colData(x))})
+
+```
+
+# Create a singkle sce_comb object from the list of sce
+
+```{r Creating a sce_comb object with all sce}
+
+## Get total raw counts, first in a list, then combine them into a matrix
+counts_comb = lapply(list_all_sce_restricted, function(x) {counts(x)})
+counts_comb <- Reduce(function(x, y) cbind(x, y), counts_comb)
+
+## Then get total logNormed counts, first in a list, then combine them into a matrix
+logcounts_comb = lapply(list_all_sce_restricted, function(x) {logcounts(x)})
+logcounts_comb <- Reduce(function(x, y) cbind(x, y), logcounts_comb)
+
+# Combine all cell metadata (columns are already the same for each object of the list)
+colData_comb = lapply(list_all_sce_restricted, function(x) {colData(x)})
+colData_comb = Reduce(function(x, y) rbind(x, y), colData_comb)
+
+# Combine the slots to create the combined sce object
+sce_comb <- SingleCellExperiment( 
+  assays = list(counts = counts_comb, logcounts = logcounts_comb),  
+  rowData = rowData(list_all_sce_restricted[[1]]), # RowData is similar among all elements 
+  colData = colData_comb
+) 
+
+```
+
+```{r Export list_sce and sce_comb}
+
+saveRDS(
+  object = list_all_sce_restricted,
+  file = paste0(out_path,time_stamp(),"list_all_sce_restricted_comb_harmonized.rds"))
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_all_restricted_harmonized.rds"))
+
+```
+

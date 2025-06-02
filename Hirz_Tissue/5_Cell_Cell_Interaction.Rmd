@@ -1,0 +1,498 @@
+---
+title: "Hirz 2022 : cell-cell interaction"
+author: "Romuald Parmentier"
+date: "2024-11-18"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+#Libraries
+library(SingleCellExperiment)
+library(dplyr)
+library(liana)
+library(ggplot2)
+library(tidyr)
+library(ggvenn)
+library(ComplexHeatmap)
+
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Color_Palettes.R")
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  exp = "dimension_reduction"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce_comb after cell type assignation
+
+file_path = get_exp_file_path(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  prev_exp = "dimension_reduction"
+  pattern = "sce_comb_di_reduced.rds")
+
+print(file_path)
+sce_comb = readRDS(file = file_path) 
+
+
+
+```
+
+# Run cell-to-cell interaction analysis (LIANA)
+
+```{r Run LIANA}
+
+# Set default ID column as the cell type of your choice
+colLabels(sce_comb) = sce_comb$cell_type_broad
+
+# Compute the results according LIANA 
+liana_results = liana_wrap(sce = sce_comb) 
+
+# Rank Liana results according LIANA re-implemented ranking method (RRA package)
+liana_results_df = liana_results %>% liana_aggregate()
+
+```
+
+# Export output files
+
+```{r Run LIANA}
+
+saveRDS(
+  object = liana_results,
+  file = paste0(out_path,time_stamp(),"LIANA_wrap_aggregated.rds"))
+
+saveRDS(
+  object = liana_results_df,
+  file = paste0(out_path,time_stamp(),"LIANA_wrap_aggregated_table.rds"))
+
+write.csv(x = liana_results_df,
+  file = paste0(out_path,time_stamp(),"LIANA_wrap_aggregated_table.csv"))
+
+```
+
+# Visualization
+
+```{r Load LIANA results to avoid rerunning it}
+
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = paste(names(samples_ID), collapse = "_"),
+  prev_exp = "cell_cell_interaction", 
+  pattern = "LIANA_wrap_aggregated_table.rds")
+
+print(file_path)
+liana_results_df = readRDS(file = file_path) 
+
+```
+
+## Interactions dotplots
+
+```{r Dot plot top 20: Luminal cells as targets}
+
+target_cell = "Epithelial_Luminal"
+
+plot = liana_results_df %>% 
+  liana_dotplot(
+    source_groups = c(
+      "Endothelial", "Fibroblasts", "Pericytes",
+      "Epithelial_Luminal", "Epithelial_Tumor", "Epithelial_Basal", "Epithelial_Hillock", "Epithelial_Club",
+      "Macrophages","Monocytes", "Dendritic_Cells", 
+      "Cytotoxic_T_Cells","Natural_Killer_Lymphocytes","T_Helper_Cells","Regulatory_T_cells",
+      "Plasmocytes", "B_Cells", "Mastocytes"),
+    target_groups = c(target_cell),
+    ntop = 20)
+
+plot = plot + theme(title = element_text(size = 12),
+                    axis.title.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 10),
+                    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+                    strip.text  = element_text(angle = 90, hjust = 1, size = 8),
+                    axis.text.y = element_text(size = 6),
+                    legend.text = element_text(size = 5),
+                    legend.title = element_text(size = 10))
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Dotplot_top20_LIANA_aggregate_", target_cell,".pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+
+```
+
+```{r Dot plot top 20: Tumor cells as targets}
+
+target_cell = "Epithelial_Tumor"
+
+plot = liana_results_df %>% 
+  liana_dotplot(
+    source_groups = c(
+      "Endothelial", "Fibroblasts", "Pericytes",
+      "Epithelial_Luminal", "Epithelial_Tumor", "Epithelial_Basal", "Epithelial_Hillock", "Epithelial_Club",
+      "Macrophages","Monocytes", "Dendritic_Cells", 
+      "Cytotoxic_T_Cells","Natural_Killer_Lymphocytes","T_Helper_Cells","Regulatory_T_cells",
+      "Plasmocytes", "B_Cells", "Mastocytes"),
+    target_groups = c(target_cell),
+    ntop = 20)
+
+plot = plot + theme(title = element_text(size = 12),
+                    axis.title.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 10),
+                    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+                    strip.text  = element_text(angle = 90, hjust = 1, size = 8),
+                    axis.text.y = element_text(size = 6),
+                    legend.text = element_text(size = 5),
+                    legend.title = element_text(size = 10))
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Dotplot_top20_LIANA_aggregate_Tumor_Cells.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+```
+
+```{r Dot plot top 50: Tumor exclusive interactions}
+
+ligands_Tum_exclusive <- liana_results_df %>%
+  group_by(ligand) %>%
+  filter(all(target_group == "Epithelial_Tumor")) %>%
+  ungroup()
+
+plot = ligands_Tum_exclusive %>% 
+  liana_dotplot(
+    source_groups = c(
+      "Endothelial", "Fibroblasts", "Pericytes",
+      "Epithelial_Tumor", "Epithelial_Basal", "Epithelial_Hillock", "Epithelial_Club",
+      "Macrophages","Monocytes", "Dendritic_Cells", "T_Cells", "Plasmocytes", "B_Cells", "Mastocytes"),
+    target_groups = c("Epithelial_Tumor"),
+    ntop = 50)
+
+plot = plot + theme(title = element_text(size = 12),
+                    axis.title.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 10),
+                    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+                    strip.text  = element_text(angle = 90, hjust = 1, size = 8),
+                    axis.text.y = element_text(size = 6),
+                    legend.text = element_text(size = 5),
+                    legend.title = element_text(size = 10))
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Dotplot_top50_LIANA_aggregate_Epithelial_Tumor_ONLY.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 120,
+  unit = "mm"
+)
+
+```
+
+```{r Dot plot top 20: Basal cells as targets}
+
+target_cell = "Epithelial_Basal"
+
+plot = liana_results_df %>% 
+  liana_dotplot(
+    source_groups = c(
+      "Endothelial", "Fibroblasts", "Pericytes",
+      "Epithelial_Luminal", "Epithelial_Tumor", "Epithelial_Basal", "Epithelial_Hillock", "Epithelial_Club",
+      "Macrophages","Monocytes", "Dendritic_Cells", 
+      "Cytotoxic_T_Cells","Natural_Killer_Lymphocytes","T_Helper_Cells","Regulatory_T_cells",
+      "Plasmocytes", "B_Cells", "Mastocytes"),
+    target_groups = c(target_cell),
+    ntop = 20)
+
+plot = plot + theme(title = element_text(size = 12),
+                    axis.title.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 10),
+                    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+                    strip.text  = element_text(angle = 90, hjust = 1, size = 8),
+                    axis.text.y = element_text(size = 6),
+                    legend.text = element_text(size = 5),
+                    legend.title = element_text(size = 10))
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Dotplot_top20_LIANA_aggregate_", target_cell,".pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+
+```
+
+```{r Dotplot with Amandine selected L-R pairs}
+
+selected_interactions = c(
+    "EREG->ERBB3",
+    "AREG->ERBB3",
+    "HBEGF->CD9",
+    "IL6->F3",
+    "LTF->LRP11",
+    "IGF1->IGF1R",
+    "APOE->LRP5",
+    "PTN->SDC2",
+    "MDK->TSPAN1",
+    "TGFB1->CAV1",
+    "IL1B->ADRB2",
+    "SFRP2->FZD5",
+    "FSTL1->DIP2A")
+
+targeted_cells = "Epithelial_Tumor"
+
+liana_results_df_subset = liana_results_df %>%
+  mutate(L_R = paste0(ligand.complex,"->",receptor.complex)) %>%
+  filter(target == targeted_cells) %>%
+  filter(L_R %in% selected_interactions) %>%
+  mutate(L_R = factor(L_R, levels = selected_interactions)) %>%
+  arrange(L_R)
+  
+plot = liana_results_df_subset %>% 
+  liana_dotplot(
+    source_groups =c("Endothelial", "Fibroblasts", "Pericytes",
+      "Epithelial_Luminal", "Epithelial_Tumor", "Epithelial_Basal", "Epithelial_Hillock", "Epithelial_Club",
+      "Macrophages","Monocytes", "Dendritic_Cells", 
+      "Cytotoxic_T_Cells","Natural_Killer_Lymphocytes","T_Helper_Cells","Regulatory_T_cells",
+      "Plasmocytes", "B_Cells", "Mastocytes"))
+
+plot = plot + theme(title = element_text(size = 12),
+                    axis.title.x = element_text(size = 12),
+                    axis.title.y = element_text(size = 10),
+                    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+                    strip.text  = element_text(angle = 90, hjust = 1, size = 8),
+                    axis.text.y = element_text(size = 6),
+                    legend.text = element_text(size = 5),
+                    legend.title = element_text(size = 10))
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Dotplot_selected_L-R_LIANA_aggregate_", targeted_cells,".pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+
+
+```
+
+## Venn diagrams of uniue and shared ligands
+
+```{r Extract significant interactions of Luminal/Basal/Tumor cells}
+
+# Extract significant interactions with luminal cells as targets
+significant_liana_Lum = liana_results_df %>% 
+    filter(target == "Epithelial_Luminal") %>% 
+  filter(aggregate_rank < 0.01) 
+
+Lum_df = tibble(
+  source = significant_liana_Lum$source,
+  ligands = significant_liana_Lum$ligand.complex,
+  receptor = significant_liana_Lum$receptor.complex)
+
+# Extract top100 interactions with tumor cells as targets
+significant_liana_Tum = liana_results_df %>% 
+  filter(target == "Epithelial_Tumor") %>% 
+  filter(aggregate_rank < 0.01) 
+
+Tum_df = tibble(
+  source = significant_liana_Tum$source,
+  ligands = significant_liana_Tum$ligand.complex,
+  receptor = significant_liana_Tum$receptor.complex)
+
+# Extract top100 interactions with basal cells as targets
+significant_liana_Bas = liana_results_df %>% 
+  filter(target == "Epithelial_Basal") %>% 
+  filter(aggregate_rank < 0.01) 
+
+Bas_df = tibble(
+  source = significant_liana_Bas$source,
+  ligands = significant_liana_Bas$ligand.complex,
+  receptor = significant_liana_Bas$receptor.complex)
+
+```
+
+```{r}
+
+list_ligands = list(
+  Lum_ligands = unique(significant_liana_Lum$ligand.complex),
+  Tum_ligands = unique(significant_liana_Tum$ligand.complex),
+  Bas_ligands = unique(significant_liana_Bas$ligand.complex)
+)
+
+plot = ggvenn(x, text_size = 5, show_percentage = F, show_outside = "auto")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Venn_Diagram_Luminal_Tumor_Basal_ligands.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+```
+
+## Upset plot of unique and shared ligands
+
+```{r}
+
+# Make a matrix with 1 (discarded after those treshold) & 0 (below QC threshold) instead of TRUE/FALSE
+comb_mat = tibble(
+  Cell_type = c(
+    rep("Luminal", length(Lum_ligands)),
+    rep("Tumor", length(Tum_ligands)),
+    rep("Basal", length(Bas_ligands))),
+    ligands = c(list_ligands$Lum_ligands,list_ligands$Tum_ligands,list_ligands$Bas_ligands)
+)
+
+
+comb_mat$Value = 1
+
+comb_mat = comb_mat %>% pivot_wider(names_from = Cell_type, values_from = Value, values_fill = 0)
+
+# Create combination matrix, necessary for UpSetR package to work
+comb_mat_upset = make_comb_mat(comb_mat)
+
+# Export the Upset plot (doesn't work with ggsave)
+{
+  
+  pdf(
+    file=paste0(out_path,time_stamp(),"plots_Upset_Diagram_Luminal_Tumor_Basal_ligands.pdf"),
+    width = 8,
+    height = 6,
+    title = paste0(out_path,time_stamp(),"Cell cell interaction ligands"))
+  
+  
+  ht <- UpSet(comb_mat_upset,
+              comb_order = order(-comb_size(comb_mat_upset)),
+              top_annotation = upset_top_annotation(comb_mat_upset, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(comb_mat_upset, add_numbers = TRUE))
+  draw(ht)
+  dev.off()
+  
+}
+
+```
+
+```{r Human readable Source-Ligands table}
+
+comb_mat = comb_mat %>%
+  mutate(Uptaken_by = ifelse(Luminal == 1 & Tumor == 1 & Basal == 1, "Luminal-Tumor-Basal",
+                            ifelse(Luminal == 1 & Tumor == 1, "Luminal-Tumor",
+                                   ifelse(Tumor == 1 & Basal == 1, "Tumor-Basal",
+                                          ifelse(Luminal == 1, "Luminal",
+                                                 ifelse(Tumor == 1, "Tumor",
+                                                        ifelse(Basal == 1, "Basal", "Tumor")))))))
+
+comb_mat = comb_mat %>% dplyr::select(ligands, Uptaken_by)
+
+###
+# Full significant ligands table
+##
+significant_table = rbind(significant_liana_Bas,significant_liana_Lum,significant_liana_Tum)
+
+
+###
+# Join the two tables and makes it human readble (source, target and ligands)
+###
+
+# Step 1: Join the tables
+joined_tibble <- left_join(comb_mat, significant_table, by = "ligands")
+
+# Step 2: Group by ligands and summarize the source values
+grouped_tibble <- joined_tibble %>%
+                  group_by(ligands, Uptaken_by) %>%
+                  summarise(source = unique(source))
+
+# Step 3: Create the new column with combined source values
+final_tibble <- grouped_tibble %>%
+                mutate(source = paste(unique(source), collapse = "-"))
+
+# Step 4: Remove potential duplicates in the new source column
+final_tibble <- final_tibble %>%
+                distinct(ligands, .keep_all = TRUE)
+
+# View the final tibble
+print(final_tibble)
+
+
+write.csv2(x = final_tibble,
+           file = paste0(out_path,time_stamp(),"Table_source_target_ligands.csv")
+            )
+
+```
+
+```{r}
+
+# Extract common and different ligands complex
+
+common_ligands = ligands_top50_Lum[ligands_top50_Lum %in% ligands_top50_Tum]
+diff_ligand_Tum = setdiff(ligands_top50_Tum, ligands_top50_Lum )
+diff_ligand_Lum = setdiff(ligands_top50_Lum, ligands_top50_Tum )
+
+```
+
+
+
+```{r Plot number of interaction per cell types}
+
+# Keep only interaction with a P-value Adjusted
+
+liana_results_significant = liana_results %>% 
+  filter(aggregate_rank < 0.05) %>%
+  dplyr::rename(ligand=ligand.complex, receptor=receptor.complex)
+
+
+liana_results_significant$intereaction_type = paste0(liana_results_significant$source,"-",liana_results_significant$target)
+nb_interaction_table = table(liana_results_significant$intereaction_type)
+
+nb_interaction_df = tibble(
+  Interaction_type = names(nb_interaction_table),
+  Count = nb_interaction_table)
+
+nb_interaction_df <- separate(nb_interaction_df, Interaction_type, into = c("Source", "Target"), sep = "-", remove = FALSE)
+
+data = nb_interaction_df %>% filter(Target == "Epithelial_Tumor")
+
+p <- ggplot(data, aes(x = Source, y = Count)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Source", y = "Count") +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8))
+
+
+p
+
+ggsave(
+  plot = p,
+  filename = paste0(out_path,time_stamp(),"plots_Histogram_Nb_Interactions_Target_TumorEp",cell_type_method,".pdf"),
+  device = "pdf",
+  width = 210,
+  height = 210,
+  unit = "mm"
+)
+
+```
+
+
+

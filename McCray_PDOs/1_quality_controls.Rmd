@@ -1,0 +1,376 @@
+---
+title: "1.McCray_2019 (PDOs): Quality Controls"
+author: "Romuald Parmentier"
+date: "2024-03-26"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(stringr)
+library(scater)
+library(dplyr)
+library(ComplexHeatmap) # For upset plots
+
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "McCray_PDOs",
+  exp = "1_quality_controls"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+  expression_matrix <- Read10X(data.dir = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Pre_Processed_Data/McCray_2019/")
+seurat_comb = CreateSeuratObject(counts = expression_matrix)
+
+seurat_comb$Sample_Description = "GSM3735994_McCray_2019"
+
+```
+
+```{r Clean object}
+
+# Convert seurat object into sce objects
+sce = SingleCellExperiment(
+  assays = list(counts = seurat_comb@assays$RNA$counts),
+  rowData = data.frame("SYMBOL" = rownames(seurat_comb)), 
+)
+
+# Remove the suffix at the end of each cell_ID ending with -1 
+colnames(sce) <- str_split_i(colnames(sce), pattern = "-", i = 1)
+# Add origin of dataset as suffix to cell_ID
+colnames(sce) = paste0(colnames(sce),"-GSM3735994_McCray_2019")
+
+```
+
+```{r Convert ENSEMBL <--> SYMBOL and add other gene informations}
+
+## Load the annotation resource
+EnsDb.Hsapiens.v104 <- AnnotationHub()[["AH95744"]]
+
+# Extract rowData slot of the first object (same evrywhere)
+rowData_df = as_tibble(rowData(sce))
+
+# Map ENSEMBL ID to SYMBOL
+SYMBOL_to_ENS <- mapIds(
+  EnsDb.Hsapiens.v104, 
+  keys = rowData_df$SYMBOL, # List against which we want a match
+  keytype = "SYMBOL",# Type of the key (predefined list, see help)
+  column = "GENEID") # The matching request
+
+# Add symbol column to rowData_df
+rowData_df$ENSEMBL = SYMBOL_to_ENS
+
+# Fiulter out NA in ENSEMBL otherwise mapping is not possible
+rowData_df = rowData_df%>%
+  dplyr::filter(!is.na(ENSEMBL))
+
+# Map feature type to rowData_df
+ENS_to_SYMBOL <- mapIds(
+  EnsDb.Hsapiens.v104, 
+  keys = rowData_df$ENSEMBL, # List against which we want a correspondence
+  keytype = "GENEID",# Type of the key (predefined list, see help)
+  column = "GENEBIOTYPE")# The matching request
+
+# Add type of feature column to rowData_df
+rowData_df$GENEBIOTYPE = ENS_to_SYMBOL
+
+# Map chromosome to rowData_df
+ENS_to_chr <- mapIds(
+  EnsDb.Hsapiens.v104, 
+  keys = rowData_df$ENSEMBL, # List against which we want a correspondence
+  keytype = "GENEID",# Type of the key (predefined list, see help)
+  column = "SEQNAME")
+
+# Add chromosome to rowData_df
+rowData_df$SEQNAME = ENS_to_chr
+
+new_rowData_df = rowData_df %>%
+  dplyr::filter(SEQNAME %in% c(1:22, "MT","X","Y")) %>%
+  dplyr::filter(GENEBIOTYPE %in% c("protein_coding","lncRNA")) %>%
+  dplyr::filter(SYMBOL != "") %>%
+  dplyr::select(ENSEMBL,SYMBOL,GENEBIOTYPE,SEQNAME)
+
+# Find common genes between the current SCE object's rownames and the ENSEMBL IDs in new_rowData
+common_genes <- intersect(rownames(sce), new_rowData_df$SYMBOL)
+
+# Subset the counts matrix to include only the common genes found in both the SCE object and new_rowData
+subset_counts <- counts(sce)[common_genes, ]
+
+# Ensure rownames of the subset_counts matrix are updated to the corresponding SYMBOL names from new_rowData
+rownames(subset_counts) <- new_rowData_df$SYMBOL
+
+# Create a new SCE object with:
+# - Subsetted counts matrix (updated gene names)
+# - Updated rowData (with SYMBOLs)
+# - Same colData as the original SCE object
+sce <- SingleCellExperiment(
+  assays = list(counts = subset_counts),  # Updated counts matrix
+  rowData = DataFrame(new_rowData_df),   # Updated rowData with SYMBOLs
+  colData = colData(sce)  # Retain original colData unchanged
+)
+
+```
+
+# Quality controls
+
+## Detection of good/bad quality cells
+
+```{r Adding UMI + GENE +  Mitochondrial reads info, message=FALSE, warning=F}
+
+## Compute and add the per-cell QC statistics to the colData of the sce object, 
+sce = addPerCellQCMetrics(
+  x = sce,
+  subsets = list(
+    mitochondrial_reads = grep(x = rowData(sce)$SEQNAME, pattern = "MT", perl = T ))
+)
+
+```
+
+```{r Detecting and removing doublets of cells, message=FALSE, warning=F}
+
+# Quick normalization of the data 
+sce <- scater::logNormCounts(sce)
+
+# Identify highly variable genes (adjust the method as needed)
+gene_var <- scran::modelGeneVar(sce)
+top_genes <- scran::getTopHVGs(gene_var, n = 1000)
+
+# Run PCA on the top genes
+set.seed(123)
+sce <- scater::runPCA(sce, subset_row = top_genes)
+
+# Identifies doublet and add them to sce object
+# Doublet rate expected = 4% corresponds to the number of doublets expected when 7500 cells are recovered (see publication)
+sce <- scDblFinder::scDblFinder(sce, dbr = 0.06) #
+print(paste("Number of doublets identified: ", length(which(sce$scDblFinder.class == "doublet"))))
+
+# Remove the PCA from the sce object (will be recomputed later)
+reducedDim(sce,"PCA") = NULL
+
+```
+
+```{r Detect and remove bad quality cells, warning=F}
+
+# Setting all tresholds according publication, when available 
+min_nb_UMI_treshold = 11000 
+min_nb_genes_treshold = 500
+mito_pct_treshold = 8 # As stated in the publication
+
+sce$doublet_discarded <- if_else(
+  sce$scDblFinder.class == "doublet", TRUE, FALSE) 
+
+sce$UMI_discarded <- if_else(
+  sce$sum < min_nb_UMI_treshold, TRUE, FALSE) 
+
+sce$gene_discarded <- if_else(
+  sce$detected < min_nb_genes_treshold, TRUE, FALSE) 
+
+sce$mito_discarded = if_else(
+  sce$subsets_mitochondrial_reads_percent > mito_pct_treshold, TRUE, FALSE)
+
+# Set the global QC discard column
+discard <- sce$doublet_discarded | sce$UMI_discarded | sce$gene_discarded | sce$mito_discarded 
+sce$qc_discarded = discard 
+
+cat(
+  paste0(
+    "\n",
+    "Sample: ", name,
+    "\n",
+    "Number of cell before QC: ", ncol(sce),
+    "\n",
+    "Number of cells discarded after qc analysis: ", unname(table(sce$qc_discarded)[2]),
+    "\n",
+    "Number of cells retained after qc: ", unname(table(sce$qc_discarded)[1]),
+    "\n"
+  )
+)
+
+```
+
+## Visualization of QC effects
+
+```{r Extract sce object metadata of pre-filtered sce}
+
+md_df = as_tibble(colData(sce))
+
+```
+
+```{r Visualize distribution of QC per cell in population}
+
+name = unique(sce$Sample_Description)
+
+####################################
+## Distribution mitochondrial reads
+###################################
+
+  md_df$QC.treshold = ifelse(test = md_df$subsets_mitochondrial_reads_percent > mito_pct_treshold, "Discarded", "Kept")
+  
+  plot = md_df %>%
+    ggplot(aes(subsets_mitochondrial_reads_percent, fill = QC.treshold)) + 
+    geom_histogram(colour = "black", binwidth = 1) +
+    scale_fill_manual(values = c("Discarded"="red", "Kept"="green")) +
+    xlim(c(0, 100)) +
+    ggtitle(
+      label = paste0("Sample: ", name, "| Mitochondrial read % per cell"),
+      subtitle = paste0(
+        "Nb cells with mitochondrial read count >", mito_pct_treshold, "% = ", sum(md_df$mito_discarded ),
+        "\n",
+        "Nb cells with mitochondrial read count <", mito_pct_treshold, "% = ", sum(!md_df$mito_discarded),
+        "\n",
+        "Mean = ", round(mean(md_df$subsets_mitochondrial_reads_percent),0), " % / cell | ", 
+        "Median = ", round(median(md_df$subsets_mitochondrial_reads_percent),0), " % / cell"))
+  
+  
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_mito_qc.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 150,
+  unit = "mm")
+
+
+##################################
+## Distribution of number of reads
+##################################
+  
+  md_df$QC.treshold = ifelse(md_df$sum < min_nb_UMI_treshold, "Discarded", "Kept")
+  
+  plot = md_df %>%
+    ggplot(aes(sum, fill = QC.treshold ))+ 
+    geom_histogram(colour = "black", binwidth = 100) +
+    scale_fill_manual(values = c("Discarded"="red", "Kept"="green")) +
+    scale_y_continuous(trans='log10') +
+    xlim(c(0, 30000)) +
+    ggtitle(
+      label = paste0("Sample: ", name, "| Total read count per cell"),
+      subtitle = paste0(
+        "Nb cells with total read count <", min_nb_UMI_treshold, "= ", sum(md_df$UMI_discarded),
+        "\n",
+        "Nb cells with total read count >", min_nb_UMI_treshold, "= ", sum(!md_df$UMI_discarded),
+        "\n",
+        "Mean = ", round(mean(md_df$sum),0), " reads / cell | ", 
+        "Median = ", round(median(md_df$sum),0)," reads / cell")
+    )  
+  
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_reads_qc.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 150,
+  unit = "mm")
+
+##########################
+## Distribution of number genes
+##########################
+
+  
+  md_df$QC.treshold = ifelse(md_df$detected < min_nb_genes_treshold, "Discarded", "Kept")
+  
+  plot = md_df %>%
+    ggplot(aes(detected, fill = QC.treshold ))+ 
+    geom_histogram(colour = "black", binwidth = 50) +
+    scale_fill_manual(values = c("Discarded"="red", "Kept"="green")) +
+    scale_y_continuous(trans='log10') +
+    xlim(c(0,15000)) +
+    ggtitle(
+      label = paste0("Sample: ", name, "| Total gene count per cell"),
+      subtitle = paste0(
+        "Nb cells with total gene detected <", min_nb_genes_treshold," = ", sum(md_df$gene_discarded),
+        "\n",
+        "Nb cells with total gene count >", min_nb_genes_treshold," = ", sum(!md_df$gene_discarded),
+        "\n",
+        "Mean = ", round(mean(md_df$detected),0), " genes / cell | ", 
+        "Median = ", round(median(md_df$detected),0)," genes / cell")
+    ) 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_genes_qc.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 150,
+  unit = "mm")
+
+```
+
+```{r Mitochondrial % vs nb of genes/reads per cell}
+
+  plot = ggplot(md_df, aes(x = sum, y = detected)) +
+    geom_point(aes(color = subsets_mitochondrial_reads_percent)) +
+    scale_x_log10() +
+    scale_color_gradient2(low = "darkblue", mid = "yellow", high = "darkred", midpoint = 50) +
+    xlab(label = "Number of reads per cell") +
+    ylab(label = "Number of genes per cell") +
+    labs(color = "% Mitochondrial reads") +
+    ggtitle(label = paste0("Sample: ", name),
+            subtitle = paste0("Total number of cells before QC = ", nrow(md_df),
+                              "\n",
+                              "Total cells of cells after QC = ", sum(!md_df$qc_discarded))
+    )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_gene_vs_read_vs_mito_pct.pdf"),
+  width = 8,
+  height = 8,
+  dpi = 300,
+  device = "pdf", 
+)
+
+```
+
+```{r UpsetPlot all the QC}
+
+# Make a matrix with 1 (discarded after those treshold) & 0 (below QC threshold) instead of TRUE/FALSE
+comb_mat = md_df %>%
+    dplyr::select(doublet_discarded, UMI_discarded, gene_discarded, mito_discarded) %>%
+  mutate(across(.cols = everything(), as.integer))
+
+# Create combination matrix, necessary for UpSetR package to work
+comb_mat = ComplexHeatmap::make_comb_mat(comb_mat)
+
+# Export the Upset plot (doesn't work with ggsave)
+{
+  pdf(
+    file=paste0(out_path,time_stamp(),"plot_Upset_all_CQ.pdf"),
+    width = 8,
+    height = 6,
+    title = "QC filters categories")
+  
+  
+  ht <- ComplexHeatmap::UpSet(comb_mat,
+                              comb_order = order(-comb_size(comb_mat)),
+                              top_annotation = upset_top_annotation(comb_mat, add_numbers = TRUE),
+                              right_annotation = upset_right_annotation(comb_mat, add_numbers = TRUE))
+  draw(ht)
+  dev.off()
+  
+}
+
+```
+
+```{r Export RDS files}
+
+saveRDS(
+  object = sce,
+  file = paste0(out_path,time_stamp(),"sce_qc.rds"))
+
+```

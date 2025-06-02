@@ -1,0 +1,345 @@
+---
+title: "6.Atlas_Pca_PDOs_and_Tissue_Differentiation"
+author: "Romuald Parmentier"
+date: "2025-01-27"
+output: html_document
+---
+
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(muscat)
+library(dplyr)
+library(ggplot2)
+library(clusterProfiler)
+library(fgsea)
+library(org.Hs.eg.db)
+library(enrichplot)
+
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  exp = "6_integrin_expression"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced")
+
+sce_comb = readRDS(file_path)
+
+# Load sce_comb from chen_2022, restricted to epithalial cells and clustering performed
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  prev_exp = "6bis_clustering_tumor_cells",
+  pattern = "sce_comb_clustered.rds")
+
+sce_comb_Chen = readRDS(file_path)
+
+# Extract tumor cells names
+tumor_cell_names = which(sce_comb_Chen$walktrap_30 %in% c(1,2,3,5,6,7,8,9,10,11))
+tumor_cell_names = colnames(sce_comb_Chen)[tumor_cell_names]
+tumor_cell_names = sub("_", "-", tumor_cell_names)
+
+basal_cell_names = which(sce_comb_Chen$walktrap_30 %in% 4)
+basal_cell_names = colnames(sce_comb_Chen)[basal_cell_names]
+basal_cell_names = sub("_", "-", basal_cell_names)
+
+# Find cells with same name in atlas to classify them as tumor cells 
+chen_tumor_cells = which(colnames(sce_comb) %in% tumor_cell_names)
+chen_basal_cells = which(colnames(sce_comb) %in% basal_cell_names)
+
+# Mark Chen tunor cells as such 
+sce_comb$Cell_Type[chen_tumor_cells] = "Epithelial_Tumor"
+sce_comb$Cell_Type[chen_basal_cells] = "Epithelial_Basal"
+
+
+```
+
+```{r Harmonizing cell type annotations and keeping only tissue cells}
+
+sce_comb$Cell_Type = ifelse(
+  test = sce_comb$Cell_Type %in% c("Tumor", "Epithelial_Tumor", "ERGpos_Tumor", "ERGneg_Tumor"),
+  yes = "Tumor", 
+  no = ifelse(
+    test = sce_comb$Cell_Type %in% c("Club", "Epithelial_Club"),
+    yes = "Club",
+    no = ifelse(
+      test = sce_comb$Cell_Type %in% c("BE", "Epithelial_Basal","Basal/Hillock","Epithelial_Hillock"),
+      yes = "Basal/Hillock",
+      no = ifelse(
+        test = sce_comb$Cell_Type %in% c("LE", "Epithelial_Luminal"),
+        yes = "Luminal",
+        no = sce_comb$Cell_Type
+      )
+    )
+  )
+)
+
+
+sce_comb = sce_comb[,-which(sce_comb$Cell_Type %in% c(NA, "Other","Non applicable"))]
+sce_comb = sce_comb[,which(sce_comb$Data_Type == "Tissue")]
+
+```
+
+
+```{r Define list of genes}
+
+# Define the integrin genes
+integrin_vector <- c(
+  "ITGB1", # Central integrin
+  "ITGA1", "ITGA2", "ITGA10", "ITGA11", # Collagen binding
+  "ITGA3", "ITGA6", "ITGA7", "ITGB4", # Laminin binding
+  "ITGA9", "ITGA4", "ITGB7", "ITGB2", "ITGAL", "ITGAM", "ITGAX", "ITGAD", # Leukocyte-specific
+  "ITGAV", "ITGB5", "ITGB3", "ITGB6", "ITGB8", "ITGA5", "ITGA8" # RGD binding
+)
+
+# Spot which integrins are not in the dataset
+int_not_present = which(!integrin_vector %in% rownames(sce_comb))
+
+integrin_vector = integrin_vector[-int_not_present]
+
+```
+
+```{r Shape data}
+
+# Extract normalized expression data
+# Extract the assay matrix and cell metadata
+expression_data <- as_tibble(assay(sce_comb, "logcounts")[integrin_vector,])
+expression_data$feature = integrin_vector
+
+cell_metadata <- as_tibble(colData(sce_comb)) %>% 
+  dplyr::select("Sample_Name", "Dataset" ,"Cell_Type")
+
+cell_metadata$cell = colnames(expression_data)[-ncol(expression_data)] # Don't take the feature column in account
+
+expression_data <- expression_data %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") 
+
+expression_data = expression_data %>%
+  left_join(cell_metadata, by = "cell") 
+
+```
+
+
+# Dotplot 
+
+# Average integrin expression among cell Type
+
+```{r Calculate z-score among Cell_Type}
+
+# Mean everything
+dotplot_data<- expression_data %>%
+  group_by(Sample_Name, Cell_Type, feature) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_pos_expression = sum(expression > 0) / n() * 100) %>%  # Average expression
+  ungroup() %>%
+  group_by(Cell_Type, feature) %>%
+  summarize(
+    mean_avg_expression = mean(avg_expression), 
+    mean_percent_pos_expression = mean(percent_pos_expression)
+  ) %>% 
+  ungroup() %>% 
+  group_by(Cell_Type) %>%
+  mutate(
+    z_score_mean_avg_expression = (mean_avg_expression - mean(mean_avg_expression)) / sd(mean_avg_expression)  # Z-score of the means
+  )
+
+# Reorganize feature order
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+
+```
+
+```{r Dot plot visualisation by cell type }
+
+dotplot_data$Cell_Type = factor(
+  dotplot_data$Cell_Type, 
+  levels = c("Basal/Hillock", "Club","Transitioning","Luminal","Tumor")
+)
+
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+#####
+
+colors_vector <- c(
+  "#26456EFF", "#244C7CFF", "#21538BFF", "#1C5A99FF", "#1C63A1FF", "#1C6CAAFF", "#1F74B1FF", 
+  "#2B7BB4FF", "#3482B6FF", "#3F8BBAFF", "#4F98C4FF", "#5EA5CEFF", "#78B1D3FF",
+  "#9CBBCFFF", "#FFFFFF", "#D6BFBBFF", "#E9A79DFF", "#F78E80FF", "#F6796AFF", 
+  "#EC6857FF", "#E25644FF", "#DC4636FF", "#D73529FF", "#D21E1CFF", "#CB1618FF", 
+  "#C51517FF", "#BE1316FF", "#B3101BFF", "#A70C20FF", "#9C0824FF"
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(colors_vector)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_mean_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_mean_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+####
+
+plot = ggplot(dotplot_data, aes(x = Cell_Type, y = feature)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_mean_avg_expression, size = mean_percent_pos_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = colors_vector,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Gene expression (Z-Score)"
+  ) +  # Customize size scale
+  scale_size_continuous(name = "Average % of positive cells per sample", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_Integrins_Tissue_Cell_Type_Mean.pdf"),
+  width = 6,
+  height = 6,
+  device = "pdf")
+
+
+```
+
+# Average integrin expression among Dataset-CellType
+
+```{r}
+
+# Mean everything
+dotplot_data<- expression_data %>%
+  group_by(Dataset, Sample_Name, Cell_Type, feature) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_pos_expression = sum(expression > 0) / n() * 100) %>%  # Average expression
+  ungroup() %>%
+  group_by(Dataset, Cell_Type, feature) %>%
+  summarize(
+    mean_avg_expression = mean(avg_expression), 
+    mean_percent_pos_expression = mean(percent_pos_expression)
+  ) %>% 
+  ungroup() %>% 
+  group_by(Dataset, Cell_Type) %>%
+  mutate(
+    z_score_mean_avg_expression = (mean_avg_expression - mean(mean_avg_expression)) / sd(mean_avg_expression)  # Z-score of the means
+  )
+
+# Reorganize feature order
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+```
+
+```{r Dot plot visualisation split by dataset/cell_type}
+
+dotplot_data$Dataset_Cell_Type = paste0(dotplot_data$Dataset, "_Tissue_", dotplot_data$Cell_Type)
+
+dotplot_data$Dataset_Cell_Type = factor(
+  dotplot_data$Dataset_Cell_Type,
+  levels =  c(
+    "Dolgos_2024_Tissue_Basal/Hillock", "Chen_2022_Tissue_Basal/Hillock",
+    "Hirz_2023_Tissue_Basal/Hillock", "Song_2022_Tissue_Basal/Hillock", 
+    
+    "Dolgos_2024_Tissue_Club", "Hirz_2023_Tissue_Club",
+    "Song_2022_Tissue_Club", 
+    
+    "Dolgos_2024_Tissue_Transitioning", 
+    
+    "Hirz_2023_Tissue_Luminal", "Song_2022_Tissue_Luminal", 
+    
+    "Dolgos_2024_Tissue_Tumor", "Chen_2022_Tissue_Tumor", 
+    "Hirz_2023_Tissue_Tumor", "Song_2022_Tissue_Tumor"
+  )
+)
+
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+#####
+
+colors_vector <- c(
+  "#26456EFF", "#244C7CFF", "#21538BFF", "#1C5A99FF", "#1C63A1FF", "#1C6CAAFF", "#1F74B1FF", 
+  "#2B7BB4FF", "#3482B6FF", "#3F8BBAFF", "#4F98C4FF", "#5EA5CEFF", "#78B1D3FF",
+  "#9CBBCFFF", "#FFFFFF", "#D6BFBBFF", "#E9A79DFF", "#F78E80FF", "#F6796AFF", 
+  "#EC6857FF", "#E25644FF", "#DC4636FF", "#D73529FF", "#D21E1CFF", "#CB1618FF", 
+  "#C51517FF", "#BE1316FF", "#B3101BFF", "#A70C20FF", "#9C0824FF"
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(colors_vector)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_mean_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_mean_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+####
+
+plot = ggplot(dotplot_data, aes(x = Dataset_Cell_Type, y = feature)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_mean_avg_expression, size = mean_percent_pos_expression ), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = colors_vector,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Gene expression (Z-Score)"
+  ) +  # Customize size scale
+  scale_size_continuous(name = "Average % of positive cells per sample", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_Integrins_Tissue_Dataset_Cell_Type_Mean.pdf"),
+  width = 8,
+  height = 9,
+  device = "pdf")
+
+
+```
+
+

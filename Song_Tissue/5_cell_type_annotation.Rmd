@@ -1,0 +1,330 @@
+---
+title: '5.Song 2022 tumor Tissue (Homemade pipeline : broad cell type annotation'
+author: "Romuald Parmentier"
+date: "2024-11-21"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(SingleR) # Cell type annotation
+library(celldex)
+
+# Functions and palettes
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Functions.R")
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Color_Palettes.R")
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Song_Tissue",
+  exp = "5_broad_cell_type_annotation"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load rescaled atlas sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_Tissue",
+  prev_exp = "3_dimension_reduction", 
+  pattern = "sce_comb_dim_reduced.rds")
+
+sce_comb = readRDS(file = file_path) 
+
+# Load BlueprintEncodeData ref for broad cell type assignation
+file_path = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/BlueprintEncodeData/BlueprintEncodeData.rds"
+
+Blueprint_ref = readRDS(file = file_path) 
+
+# Load celltype_ref_sce object from Hirz 2022
+####################################
+
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  prev_exp = "dimension_reduction", 
+  pattern = "sce_comb_dim_reduced")
+
+print(file_path)
+hirz_ref = readRDS(file = file_path) 
+
+# Load annotations downloaded on : 
+# https://www.dropbox.com/scl/fo/qpbazm774dtjrfe0e4aj8/APhZk5CzVG1M-POkug3sU44?rlkey=tev9wsupw3b203836b5hro4gg&e=2&dl=0
+
+original_seurat = readRDS("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Pre_Processed_Data/Song_2022/Tumor_Tissue_count_matrix/Original_Seurat_Tissue.rds")
+
+original_sce = as.SingleCellExperiment(x = original_seurat)
+
+```
+
+# Broad cell type annotation with Single R
+
+```{r Single R with BluePrint encode Data as a reference}
+
+# Compute the prediction
+pred_type <- SingleR(
+  test = sce_comb, 
+  ref = Blueprint_ref, 
+  labels = Blueprint_ref$label.main)
+
+# Assign braod cell types to tissues
+sce_comb$broad_type_Blueprint = pred_type$pruned.labels
+
+table(sce_comb$Sample_Description, sce_comb$broad_type_Blueprint)
+
+```
+
+# Annotation according Hirz_2022 dataset
+
+```{r Single R with Hirz_2022 encode Data as a reference}
+
+sample_cell_id = sample(
+  x = ncol(hirz_ref), 
+  size = ncol(sce_comb), replace = FALSE)
+
+hirz_ref_down = hirz_ref[ , sample_cell_id]
+gc()
+
+pred_broad <- SingleR(
+  test = sce_comb, 
+  ref = hirz_ref_down, 
+  labels = hirz_ref_down$cell_type_broad)
+
+# Adding the cell type is done on the origianl sce object so that the genes removed during the restrcit rowDt step are back
+sce_comb$broad_type_Hirz = pred_broad$pruned.labels
+
+```
+
+# Annotation using original annotation
+
+```{r}
+
+pred_broad <- SingleR(
+  test = sce_comb, 
+  ref = original_sce, 
+  labels = original_sce$ID)
+
+# Adding the cell type is done on the origianl sce object so that the genes removed during the restrcit rowDt step are back
+sce_comb$original_cell_type = pred_broad$pruned.labels
+
+```
+
+# Visualization 
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Facetted UMAP colored per BluePrint broad cell type}
+
+# Remove cell_type with less than 10 cells
+md_clean = md %>% 
+  group_by(broad_type_Blueprint) %>%
+  dplyr::filter(n() > 10)
+
+cell_type_id = 1
+plot_list = list()
+
+md$broad_type_Blueprint = as.character(md$broad_type_Blueprint)
+
+for (type in unique(md$broad_type_Blueprint)) {
+  
+  md_other <- md %>% dplyr::filter(broad_type_Blueprint != type)
+  md_cell_type <- md %>% dplyr::filter(broad_type_Blueprint == type)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9, shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_cell_type,
+        aes(x = UMAP_1, y = UMAP_2, fill = broad_type_Blueprint), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2
+      ), dpi = 200, scale = 0.6
+    ) +
+    scale_fill_manual(values = pal_Blueprint_cell_type) +  # Apply the custom color palette
+    ggtitle(label = type,
+            subtitle = "UMAP on batch corrected samples (Fast MNN)") +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[cell_type_id]] = plot
+  
+  cell_type_id = cell_type_id + 1
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(), "plots_UMAP_Facetted_CellType.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r Facetted UMAP colored per SingleR with Hirz Ref cell type}
+
+# Remove cell_type with less than 10 cells
+md_clean = md %>% 
+  group_by(broad_type_Hirz) %>%
+  dplyr::filter(n() > 10)
+
+cell_type_id = 1
+plot_list = list()
+
+md$broad_type_Hirz = as.character(md$broad_type_Hirz)
+
+for (type in unique(md$broad_type_Hirz)) {
+  
+  md_other <- md %>% dplyr::filter(broad_type_Hirz != type)
+  md_cell_type <- md %>% dplyr::filter(broad_type_Hirz == type)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9, shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_cell_type,
+        aes(x = UMAP_1, y = UMAP_2, fill = broad_type_Hirz), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2
+      ), dpi = 200, scale = 0.6
+    ) +
+    scale_fill_manual(values = pal_Hirz_broad_cell_type) +  # Apply the custom color palette
+    ggtitle(label = type,
+            subtitle = "UMAP on batch corrected samples (Fast MNN)") +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[cell_type_id]] = plot
+  
+  cell_type_id = cell_type_id + 1
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(), "plots_UMAP_Facetted_CellType_Hirz_ref.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r Facetted UMAP colored per SingleR with original cell type}
+
+cell_type_id = 1
+plot_list = list()
+
+md$original_cell_type = as.character(md$original_cell_type)
+
+for (type in unique(md$original_cell_type)) {
+  
+  md_other <- md %>% dplyr::filter(original_cell_type != type)
+  md_cell_type <- md %>% dplyr::filter(original_cell_type == type)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 0.9, shape = 21, color = "gray10", stroke = 0.1
+      ), dpi = 200, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_cell_type,
+        aes(x = UMAP_1, y = UMAP_2, fill = original_cell_type), 
+        alpha = 0.8, size = 1.5, shape = 21, color = "gray10", stroke = 0.2
+      ), dpi = 200, scale = 0.6
+    ) +
+    ggtitle(label = type,
+            subtitle = "UMAP on batch corrected samples (Fast MNN)") +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[cell_type_id]] = plot
+  
+  cell_type_id = cell_type_id + 1
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(), "plots_UMAP_Facetted_CellType_Original_ref.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+# Export files
+
+```{r Export sce_comb object}
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_broad_cell_type_annotated.rds"))
+
+```

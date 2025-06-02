@@ -1,0 +1,229 @@
+---
+title: '1.Dolgos Early Passage PDOS & Chen 2021 (Epithelial cells only): dataset harmonization'
+author: "Romuald Parmentier"
+date: "2024-10-25"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early-Chen_Tissue_Epithelial",
+  exp = "1_harmonization"
+)
+
+```
+
+# Prepare the data
+
+```{r Load all sce annotated}
+
+# Chen_2021 Epithelial cells only
+#################################
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tumor_Tissue",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Chen_list_sce = readRDS(file_path)
+
+# Load the annotated object to retrieve cell type
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tumor_Tissue",
+  prev_exp = "4_dimension_reduction", 
+  pattern = "sce_comb_dim_reduced")
+
+Chen_sce_comb = readRDS(file_path)
+
+# Dolgos_2024_Early_Passage
+###########################
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "1_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Dolgos_list_sce = readRDS(file_path)
+
+# Load the annotated object to retrieve Malignancy
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered")
+
+Dolgos_sce_comb = readRDS(file_path)
+
+```
+
+```{r Harmonizing Dolgos_Early_Passage dataset}
+
+sce_id = 1 
+
+for(sce in Dolgos_list_sce){
+  
+  sce = sce[, which(colnames(sce) %in% colnames(Dolgos_sce_comb))]
+  
+  # Get indice of cells in sce_comb that are in this sce
+  ind_sce_comb_cells = which(colnames(Dolgos_sce_comb) %in% colnames(sce))
+  
+  # Use this indice to assign cell_Type
+  sce$Malignancy = Dolgos_sce_comb$Malignancy[ind_sce_comb_cells]
+  
+  sce$Cell_Type <- ifelse(
+    test = grepl(x = sce$Sample_Description, pattern = "Org_ECMf"),
+    yes = "ECMf_PDOs",
+    no = "Matrigel_PDOs")
+  
+  sce$Sample_Type = "PDOs"
+  sce$Dataset = "Dolgos_2024_Early_Passage"
+  
+  # Keep only useful colData columns
+  colData(sce) = colData(sce)[c("Sample_Description","Dataset","Sample_Type", "Cell_Type", "Malignancy" ,"sizeFactor")]
+  
+  Dolgos_list_sce[[sce_id]] = sce
+  
+  sce_id = sce_id + 1
+  
+}
+
+```
+
+
+```{r Harmonizing Chen dataset}
+
+# Select only epithelial cells
+Chen_epi_sce_comb = Chen_sce_comb[,which(Chen_sce_comb$broad_type == "Epithelial cells")]
+
+sce_id = 1 
+
+for(sce in Chen_list_sce){
+  
+  sce = sce[, which(colnames(sce) %in% colnames(Chen_epi_sce_comb))]
+  
+  # Get indice of cells in sce_comb that are in this sce
+  ind_sce_comb_epi_cells = which(colnames(Chen_epi_sce_comb) %in% colnames(sce))
+  
+  # Ue this indice to assign cell_Type
+  sce$Cell_Type = Chen_epi_sce_comb$broad_type[ind_sce_comb_epi_cells]
+  sce$Sample_Type = "Parental_Tumor"
+  sce$Dataset = "Chen_2021"
+  sce$Malignancy = "Parental_Tumor"
+  
+  # Keep only useful colData columns
+  colData(sce) = colData(sce)[c("Sample_Description","Dataset","Sample_Type", "Cell_Type", "Malignancy" ,"sizeFactor")]
+  
+  Chen_list_sce[[sce_id]] = sce
+  
+  sce_id = sce_id + 1
+  
+}
+
+```
+
+```{r Combine all sce in a single list}
+
+# Gather all sce_comb in a single list
+list_all_sce = list(Dolgos_list_sce, Chen_list_sce)
+list_all_sce <- do.call(c, list_all_sce)
+
+```
+
+```{r Harmonizing count matrix ronames and colnames}
+
+##############################
+### rownames (= features) ###
+#############################
+
+list_all_sce = restrict_reorder_features_names(sce_list = list_all_sce)
+
+##################################
+### colnames (= cell barcodes) ###
+##################################
+
+# Check colnames of the matrix (normally done in previous steps)
+lapply(list_all_sce, function(x){head(colnames(x))})
+
+```
+
+```{r Harmonizing rowData and coldata}
+
+###############
+### RowData ###
+###############
+
+# Identify the common rowData columns across all SCE objects
+common_columns <- Reduce(intersect, lapply(list_all_sce, function(sce) colnames(rowData(sce))))
+
+# Update each SCE object to retain only the common rowData columns
+list_all_sce <- lapply(list_all_sce, function(sce) {
+  rowData(sce) <- rowData(sce)[, common_columns, drop = FALSE]  # Subset rowData
+  return(sce)  # Return updated sce
+})
+
+# Check colnames of the rowData (performed above)
+lapply(list_all_sce, function(x){colnames(rowData(x))})
+
+###############
+## ColData ###
+##############
+
+# Check colnames of the colData (normally done in previous steps)
+lapply(list_all_sce, function(x){colnames(colData(x))})
+
+
+```
+
+```{r Creating a sce_comb object with all sce}
+
+## Get total raw counts, first in a list, then combine them into a matrix
+counts_comb = lapply(list_all_sce, function(x) {counts(x)})
+counts_comb <- Reduce(function(x, y) cbind(x, y), counts_comb)
+
+## Then get total logNormed counts, first in a list, then combine them into a matrix
+logcounts_comb = lapply(list_all_sce, function(x) {logcounts(x)})
+logcounts_comb <- Reduce(function(x, y) cbind(x, y), logcounts_comb)
+
+# Combine all cell metadata (columns are already the same for each object of the list)
+colData_comb = lapply(list_all_sce, function(x) {colData(x)})
+colData_comb = Reduce(function(x, y) rbind(x, y), colData_comb)
+
+# Combine the slots to create the combined sce object
+sce_comb <- SingleCellExperiment( 
+  assays = list(counts = counts_comb, logcounts = logcounts_comb),  
+  rowData = rowData(list_all_sce[[1]]), # RowData is similar among all elements 
+  colData = colData_comb
+) 
+
+```
+
+```{r Export list_sce and sce_comb}
+
+###########
+# Export list_sce_comb object
+##########
+
+saveRDS(
+  object = list_all_sce,
+  file = paste0(out_path,time_stamp(),"list_all_sce_comb_harmonized.rds"))
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_all_harmonized.rds"))
+
+```
+

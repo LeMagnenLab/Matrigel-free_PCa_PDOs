@@ -1,0 +1,545 @@
+---
+title: "5.Tissue and PCA Org integration : Signature scores all cells"
+author: "Romuald Parmentier"
+date: "2025-01-08"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+#Libraries
+library(SingleCellExperiment)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggbeeswarm)
+library(gridExtra)
+library(scater)
+library(org.Hs.eg.db)
+library(ComplexHeatmap)
+library(ggpubr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  exp = "5_signature_scores_all_cells"
+)
+
+```
+
+# Prepare the data
+
+```{r Load sce object after dimension reduction and restrcit it to groups of interest}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced")
+
+sce_comb = readRDS(file_path)
+
+# Load gene set enrichment object list (only significative pathway present)
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  prev_exp = "4_differential_expression_all_cells",
+  pattern = "object_GSE_list_per_collection_Cutlure_Condition")
+
+gse_list = readRDS(file_path)
+
+# Load gene set enrichment object list (only significative pathway present)
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  prev_exp = "4_differential_expression_all_cells",
+  pattern = "object_ORA_GOBP_Culture_Condition.rds")
+
+ora_list = readRDS(file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Signature scores for enriched pathways found with GSEA
+
+## Perform signature score calculation and add it to the object
+
+```{r Format collection of enriched pathways and gse results }
+
+REACTOME = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_REACTOME.gmt")
+HALLMARK = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_HALLMARKS_hs_v2023_2.gmt")
+KEGG_CP = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_KEGG_Canonical_Pathways.gmt")
+GOBP = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Biological_Process.gmt")
+GOMF = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Molecular_Function.gmt")
+
+list_collection = list(
+  "REACTOME" = REACTOME,
+  "HALLMARK" = HALLMARK,
+  "KEGG_CP" = KEGG_CP,
+  "GOBP" = GOBP,
+  "GOMF" = GOMF)
+
+# Make a single df out of all gene sets fron differnet collecitons
+collection_df = data.table::rbindlist(list_collection)
+
+```
+
+```{r Extract whole gene list corresponding to GSEA enriched terms of interst}
+
+# Make a single df out of the gse results
+gse_results_df = lapply(gse_list, function(gse){rbind(gse@result)})
+gse_results_df = data.table::rbindlist(gse_results_df)
+
+# Select only enriched pathways
+gse_enriched_pathways = gse_results_df$ID
+
+```
+
+```{r Extract whole gene list corresponding to OR enriched terms of interst}
+
+enriched_terms = collection_df %>% 
+  filter(term %in% c(gse_enriched_pathways))
+
+```
+
+```{r Add signature score to sce object }
+
+for(pathway in unique(enriched_terms$term)){
+  
+  print(paste0("Enrich plot for pathway: ", pathway))
+  
+  # Select genes on which calculating the signature score
+  genes_of_interest <- enriched_terms %>% filter(term == pathway)
+  genes_of_interest = as.vector(genes_of_interest$gene)
+  
+  # Calculate signature score and add it to seurat object as an alternative assays (signature only + signature genes only)
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = pathway, 
+    signature_genes = genes_of_interest
+  )
+  
+  # Transfer the signature score from seurat to sce (score in colData, genes of the signature marked in the rowData)
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = pathway,
+    seurat_assay = paste0(pathway, "_score_only"),
+    signature_genes = genes_of_interest
+  )
+  
+}
+
+
+```
+
+## Visualize it
+
+```{r Export all metadata into a dataframe}
+
+md = colData(sce_comb)
+md = as_data_frame(md)
+
+```
+
+```{r Violin plots split by samples and ordered/colored by Data Type}
+
+out_path <- create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "5_signature_scores_all_cells/Enriched_Signatures"
+)
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+pathway_id = 1
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_summarised_sorted <- md %>%
+    group_by(Data_Type, Sample_Name) %>%                  # Group by Data_Type and Sample_Name
+    summarise(median_score = median(.data[[gene_signature]]), .groups = "drop") %>% # Compute median score
+    arrange(Data_Type, desc(median_score))
+  
+  md$Sample_Name = factor(md$Sample_Name, levels = md_summarised_sorted$Sample_Name )
+  
+  plot =  ggplot(md, aes(x = Sample_Name, y = .data[[gene_signature]], fill = Data_Type)) +
+    geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+    geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  # Add 0 line # Optional: Add boxplot overlay
+    scale_fill_manual(values = pal_data_type_details) +  # Choose a color palette
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  
+  plot_list[[pathway_id]] = plot
+  
+  pathway_id = pathway_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_gene_culture_Enriched_Pathways_Split_Samples.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+```{r Violin plots split by samples  and ordered/colored by Data Type}
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+pathway_id = 1
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_summarised_sorted <- md %>%
+    group_by(Data_Type, Sample_Name) %>%                  # Group by Data_Type and Sample_Name
+    summarise(median_score = median(.data[[gene_signature]]), .groups = "drop") %>% # Compute median score
+    arrange(Data_Type, desc(median_score))
+  
+  md$Sample_Name = factor(md$Sample_Name, levels = md_summarised_sorted$Sample_Name )
+  
+  plot =  ggplot(md, aes(x = Sample_Name, y = .data[[gene_signature]], fill = Data_Type)) +
+    geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+    geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  # Add 0 line # Optional: Add boxplot overlay
+    scale_fill_manual(values = pal_data_type_details) +  # Choose a color palette
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  
+  plot_list[[pathway_id]] = plot
+  
+  pathway_id = pathway_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_gene_culture_Enriched_Pathways_Split_Samples.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+```{r Violin plots split by Culture_Condition and colored by culture condition}
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+pathway_id = 1
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+ plot =  ggplot(md, aes(x = Culture_Condition, y = .data[[gene_signature]], fill = Culture_Condition)) +
+  geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+  geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +  # Optional: Add boxplot overlay
+  scale_fill_manual(values = pal_culture_condition) +  # Choose a color palette
+  labs(
+    title = paste0("Signature score:", gene_signature),
+    x = "Sample",
+    y = "log2(UMI)",
+    fill = "Data Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    strip.text = element_text(size = 12)
+  ) +
+  guides(fill = "none")
+
+plot_list[[pathway_id]] = plot
+
+pathway_id = pathway_id + 1
+
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_gene_culture_Enriched_Pathways_Split_Culture_Condition.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+```
+
+```{r Violin plots split by Data Type}
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+pathway_id = 1
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+ plot =  ggplot(md, aes(x = Data_Type, y = .data[[gene_signature]], fill = Data_Type)) +
+  geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+  geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +  # Optional: Add boxplot overlay
+  scale_fill_manual(values = pal_data_type_details) +  # Choose a color palette
+  labs(
+    title = paste0("Signature score:", gene_signature),
+    x = "Sample",
+    y = "log2(UMI)",
+    fill = "Data Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    strip.text = element_text(size = 12)
+  ) +
+  guides(fill = "none")
+
+plot_list[[pathway_id]] = plot
+
+pathway_id = pathway_id + 1
+
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_gene_culture_Enriched_Pathways_Split_Data_Type.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+```
+
+```{r Violin plots split by DataSet and colored by Culture_Condition}
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+pathway_id = 1
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+ plot =  ggplot(md, aes(x = Dataset, y = .data[[gene_signature]], fill = Data_Type)) +
+  geom_violin(trim = TRUE, scale = "width", width = 0.6, position = position_dodge(0.75)) +  # Unified width
+  geom_boxplot(width = 0.3, position = position_dodge(0.75), outlier.shape = NA) +  # Match width and position
+  scale_fill_manual(values = pal_data_type_details) +
+  facet_wrap(~ Data_Type, scales = "free_x",drop = T) +  # Facet by gene# Choose a color palette
+  labs(
+    title = paste0("Signature score:", gene_signature),
+    x = "Sample",
+    y = "log2(UMI)",
+    fill = "Data Type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+    strip.text = element_text(size = 12)
+  ) +
+  guides(fill = "none")
+
+plot_list[[pathway_id]] = plot
+
+pathway_id = pathway_id + 1
+
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_gene_culture_Enriched_Pathways_Split_Dataset_Culture_Condition.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+```
+
+### Signature of choice
+
+```{r}
+
+terms_of_interst = c(
+  "GOBP_TRANSCRIPTION_INITIATION_AT_RNA_POLYMERASE_II_PROMOTER",
+  "REACTOME_EUKARYOTIC_TRANSLATION_INITIATION",
+  "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+  "REACTOME_UNFOLDED_PROTEIN_RESPONSE_UPR",
+  "REACTOME_TNFR1_INDUCED_NF_KAPPA_B_SIGNALING_PATHWAY",
+  "REACTOME_TNF_SIGNALING",
+  "HALLMARK_TNFA_SIGNALING_VIA_NFKB"
+  )
+
+enriched_terms = collection_df %>% 
+  filter(term %in% terms_of_interst)
+
+```
+
+```{r Add signature score to sce object }
+
+for(pathway in unique(enriched_terms$term)){
+  
+  print(paste0("Enrich plot for pathway: ", pathway))
+  
+  # Select genes on which calculating the signature score
+  genes_of_interest <- enriched_terms %>% filter(term == pathway)
+  genes_of_interest = as.vector(genes_of_interest$gene)
+  
+  # Calculate signature score and add it to seurat object as an alternative assays (signature only + signature genes only)
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = pathway, 
+    signature_genes = genes_of_interest
+  )
+  
+  # Transfer the signature score from seurat to sce (score in colData, genes of the signature marked in the rowData)
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = pathway,
+    seurat_assay = paste0(pathway, "_score_only"),
+    signature_genes = genes_of_interest
+  )
+  
+}
+
+
+```
+
+## Visualize it
+
+```{r Export all metadata into a dataframe}
+
+md = colData(sce_comb)
+md = as_data_frame(md)
+
+```
+
+```{r Violin plots split by samples colord by Data Type}
+
+out_path <- create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "5_signature_scores_all_cells/Signature_Of_Interest"
+)
+
+gene_signature_scores = paste0(unique(enriched_terms$term),"_score")
+pathway_id = 1
+
+for(gene_signature in gene_signature_scores){
+  
+  md_summarised_sorted <- md %>%
+    group_by(Data_Type, Sample_Name) %>%                  # Group by Data_Type and Sample_Name
+    summarise(median_score = median(.data[[gene_signature]]), .groups = "drop") %>% # Compute median score
+    arrange(Data_Type, median_score)
+  
+  md$Sample_Name = factor(md$Sample_Name, levels = md_summarised_sorted$Sample_Name )
+  
+  plot =  ggplot(md, aes(x = Sample_Name, y = .data[[gene_signature]], fill = Data_Type)) +
+    geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+    geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +
+    geom_hline(yintercept = 0, linetype = "dotted", color = "black", size = 0.8) +  # Add 0 line # Optional: Add boxplot overlay
+    scale_fill_manual(values = pal_data_type_details) +  # Choose a color palette
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  
+  ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_violin_",gene_signature,".pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+  
+  
+}
+
+
+```
+
+# Export signed sce object
+
+```{r Ecport sce_object RDS file}
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_signed.rds")
+  )
+
+```
+

@@ -1,0 +1,210 @@
+---
+title: "4.Dolgos_2024 (Early_Passage PDOs) & Song_2022 (Tum Tissue + Tum Org): gene expression visualisation"
+author: "Romuald Parmentier"
+date: "2024-11-28"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "Dolgos_PDOs_Early-Song_Tissue-Song_PDOs",
+  exp = "4_gene_expression"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early-Song_Tissue-Song_PDOs",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced.rds")
+
+sce_comb = readRDS(file_path)
+
+```
+
+```{r Add a category to sce_comb }
+
+sce_comb$Dataset_Cell_Type = paste0(
+  sub("_.*", "", sce_comb$Dataset), 
+  "_", sub("_.*", "", sce_comb$Sample_Type),
+  "_", sce_comb$Cell_Type)
+
+```
+
+
+```{r Prepare gene to show}
+
+genes_by_category <- list(
+  Club = c("PIGR", "MMP7", "LTF", "CP", "OLFM4", "SCGB1A1", "SCGB3A1"),
+  LSC_med = c("KRT4"),
+  High_NLR_associated = c("NFKB1", "IL1RN", "PLAUR"),
+  Neutrophil_inflammation = c("CXCL1", "CXCL2", "CXCL3", "CXCL5", "CXCL6", "CXCL8", "CXCR2"),
+  TRP = c("CXCL17", "CXCR6"),
+  T3_Res = c("CCL20"),
+  Monocytes_inflammation = c("CCL2", "CCL3", "CCL4", "CCL5", "CCR2", "CCR5"),
+  T1_Res = c("CXCL9", "CXCL10", "CXCL11", "CXCR3"),
+  Treg = c("CCL17", "CCL22", "CCR4"),
+  TLS = c("CCL19", "CCL21", "CCR7"),
+  senescence_club = c("CRABP2", "IGFBP3", "KRT13", "S100P", "SERPINB1", "TACSTD2", "WFDC2"),
+  PMN_MDSC_activity_club = c("CEACAM1", "CHI3L1"),
+  Senescence_PMN_MSDC_activity_club = c("LCN2", "S100A9", "SLPI"),
+  SASP = c("CTSB", "MMP10", "ICAM1"),
+  Club_like_senescence = c()
+)
+
+```
+
+
+```{r Prepare dotplot table}
+
+# Asseble both list
+all_genes = unlist(genes_by_category)
+
+all_genes = all_genes[all_genes %in% rownames(sce_comb)]
+
+# Make a df with all genes assembled
+dotplot_df = tibble(
+  Dataset_Cell_Type = rep(x = unique(sce_comb$Dataset_Cell_Type), each = length(all_genes)),
+  genes = rep(x = all_genes, length(unique(sce_comb$Dataset_Cell_Type))))
+
+# Adding the genes_origin column
+dotplot_df <- dotplot_df %>%
+  mutate(genes_origin = case_when(
+    genes %in% genes_by_category$Club ~ "Club",
+    genes %in% genes_by_category$LSC_med ~ "LSC_med",
+    genes %in% genes_by_category$High_NLR_associated ~ "High_NLR_associated",
+    genes %in% genes_by_category$Neutrophil_inflammation ~ "Neutrophil_inflammation",
+    genes %in% genes_by_category$TRP ~ "TRP",
+    genes %in% genes_by_category$T3_Res ~ "T3_Res",
+    genes %in% genes_by_category$Monocytes_inflammation ~ "Monocytes_inflammation",
+    genes %in% genes_by_category$T1_Res ~ "T1_Res",
+    genes %in% genes_by_category$Treg ~ "Treg",
+    genes %in% genes_by_category$TLS ~ "TLS",
+    genes %in% genes_by_category$senescence_club ~ "senescence_club",
+    genes %in% genes_by_category$PMN_MDSC_activity_club ~ "PMN_MDSC_activity_club",
+    genes %in% genes_by_category$Senescence_PMN_MSDC_activity_club ~ "Senescence_PMN_MSDC_activity_club",
+    genes %in% genes_by_category$SASP ~ "SASP",
+    genes %in% genes_by_category$Club_like_senescence ~ "Club_like_senescence",
+    TRUE ~ NA_character_
+  ))
+
+```
+
+```{r Make a tibble with pct.pos and avg_log2 expression}
+
+calculate_metrics <- function(sce, gene) {
+  
+  # Subset expression data for the gene
+  expr <- assay(sce, "counts")[gene, ]
+  
+  # Calculate proportion of positive cells
+  pct_positive <- sum4
+  
+  # Calculate average log2 expression (only on positive cells)
+  avg_log2_expr <- mean(assay(sce, "logcounts")[gene, ])
+  
+  return(tibble(
+    pct_positive = pct_positive,
+    average_log2_expression = avg_log2_expr
+  ))
+  
+}
+
+# Calculate the metrics for each gene and group
+dotplot_df <- dotplot_df %>%
+  group_by(Dataset_Cell_Type, genes) %>% # Rowwise will act as a grouo_by
+  mutate(
+    metrics = list(calculate_metrics(
+      sce = sce_comb[, colData(sce_comb)$Dataset_Cell_Type == Dataset_Cell_Type],
+      gene = genes
+    ))
+  ) 
+
+dotplot_df = dotplot_df %>%
+  tidyr::unnest(metrics)
+
+# Save table
+write.csv(
+  x = dotplot_df,
+  file = paste0(out_path, time_stamp(),"Club_Related_Genes_comparison.csv"))
+
+
+```
+
+# Visualization
+
+```{r Dot plot gene expression =  Fig4.E}
+
+# Reorder genes and datasets/cell_type
+dotplot_df$genes = factor(x = dotplot_df$genes, levels = unique(all_genes))
+
+dotplot_df_club = dotplot_df %>%
+  dplyr::filter(grepl(x =Dataset_Cell_Type , pattern = "Club"))
+
+for (list in unique(dotplot_df_club$genes_origin)) {
+  
+  df = dotplot_df_club %>%
+    dplyr::filter(genes_origin == list)
+  
+  # Filter the data frame to remove rows where average_log2_expression is 0
+  df_filtered <- df %>% 
+    dplyr::filter(pct_positive > 2)
+  
+  plot = ggplot(df_filtered, aes(x = Dataset_Cell_Type, y = genes)) +
+    geom_point(shape = 21,
+               aes(size = pct_positive, fill = average_log2_expression),
+             stroke = 0.5) +
+    # scale_size(range = c(1, 10)) +
+      scale_size(range = c(1, 10), 
+             breaks = c(0, 25, 50, 75, 100), # Explicitly set breaks for the size scale
+             limits = c(0, 100))+
+    scale_fill_gradientn(colors = c("lightgrey", rev(paletteer_c("viridis::magma", 30)))) +  
+    theme_minimal() +
+    labs(title = "Dotplot of Gene Expression",
+         x = "Genes",
+         y = "Dataset_Cell_Type",
+         size = "Percentage Positive",
+         color = "Average Log2 Expression") +
+    ggtitle(label = list) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  ggsave(plot = plot,
+         filename = paste0(out_path, time_stamp(), "dotplot_Dolgos_vs_Song_",list,".pdf"),
+         device =   "pdf",
+         width = 10 ,
+         height = 8)
+
+}
+
+```
+
+```{r Violin plots}
+
+scater::plotExpression(object = sce_comb, x = "Cell_Type", features = "KRT5", colour_by ="Cell_Type") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+scater::plotExpression(object = sce_comb, x = "cell_type_dataset", features = "KRT5") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+

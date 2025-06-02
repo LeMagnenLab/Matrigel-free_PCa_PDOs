@@ -1,0 +1,674 @@
+---
+title: "6.Dolgos Early Passage PDOs : cell-cell interaction exploration "
+author: "Romuald Parmentier"
+date: "2025-05-14"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ComplexHeatmap)
+library(ggrepel)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  exp = "7_Epithelial_Interactions_Exploration"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Show differential expression of integrins
+------------------------------------------
+
+```{r Extract expression data Calculate z-score}
+
+integrin_vector <- c(
+  "ITGB1", # Central integrin
+  "ITGA1", "ITGA2", "ITGA10", "ITGA11", # Collagen binding
+  "ITGA3", "ITGA6", "ITGA7", "ITGB4", # Laminin binding
+  "ITGA9", "ITGA4", "ITGB7", "ITGB2", "ITGAL", "ITGAM", "ITGAX", "ITGAD", # Leukocyte-specific
+  "ITGAV", "ITGB5", "ITGB3", "ITGB6", "ITGB8", "ITGA5", "ITGA8" # RGD binding
+)
+
+# Extract normalized expression data
+expression_data <- GetAssayData(seurat_comb, assay = "originalexp", layer = "data")[integrin_vector, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Add the identity group column
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("walktrap_30","Culture_Condition") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(Cluster = "walktrap_30", Condition = "Culture_Condition")
+
+
+# Calculate expression means and their z-scores per CLUSTER
+###########################################################
+
+# This approach makes sens with integrins as it shows the "integrin profile" of each cluster
+# Though, calculating the Z-score per feature gives similar results
+
+dotplot_data <- expression_data %>%
+  group_by(feature, Cluster, Condition) %>%
+  summarize(
+    avg_expression = mean(expression),  # Average expression
+    percent_expression = mean(expression > 0) * 100  # Percentage of expression
+  ) %>%
+  ungroup() %>%
+  group_by(Cluster, Condition) %>% # Z-score calculated among
+  mutate(
+    z_score_avg_expression = (avg_expression - mean(avg_expression)) / sd(avg_expression)  # Z-score of the means
+  )
+
+```
+
+```{r Reorder factors and preapre color scale}
+
+dotplot_data$Cluster = factor(dotplot_data$Cluster,levels = c(5,7,6,2,4,3,8,1))
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+# Create a composite variable for group and condition
+dotplot_data <- dotplot_data %>%
+  mutate(group_condition = paste0("Cluster-",Cluster,"-", Condition)) 
+
+dotplot_data$group_condition = factor(
+  dotplot_data$group_condition, 
+  levels = c(
+    "Cluster-5-ECMf", "Cluster-5-Matrigel", "Cluster-7-ECMf", "Cluster-7-Matrigel", "Cluster-6-ECMf", "Cluster-6-Matrigel","Cluster-2-ECMf", "Cluster-2-Matrigel",
+    "Cluster-4-ECMf", "Cluster-4-Matrigel" ,"Cluster-3-ECMf", "Cluster-3-Matrigel", 
+    "Cluster-8-ECMf", "Cluster-8-Matrigel", "Cluster-1-ECMf", "Cluster-1-Matrigel")
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(pal_zscore)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+
+```
+
+```{r Dot plot visualisation = Fig3.K}
+
+plot = ggplot(dotplot_data, aes(x = group_condition, y = feature )) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = pal_zscore,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Gene expression (Z-Score)"
+  ) +  # Customize size scale
+  scale_size_continuous(name =  "% of positive cells", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_Integrins.pdf"),
+  width = 8,
+  height = 9,
+  device = "pdf")
+
+
+```
+
+# Differential expression of adherens-related pathways
+-----------------------------------------------------------
+
+```{r Load collection of pathway terms}
+
+HALLMARK = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_HALLMARKS_hs_v2023_2.gmt")
+GOBP = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Biological_Process.gmt")
+GOMF = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Molecular_Function.gmt")
+C2 = read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C2_Curated_Gensets.gmt")
+
+
+list_collection = list(
+  "C2" = C2,
+  "HALLMARK" = HALLMARK,
+  "GOBP" = GOBP,
+  "GOMF" = GOMF)
+
+# Make a single df out of all gene sets fron differnet collecitons
+collection_df = data.table::rbindlist(list_collection)
+
+```
+
+```{r Select pathways of interest}
+
+# Targeted pathway (pathway present in collection df)
+#####################################################
+
+targeted_pathway_idx = grep(
+  x = collection_df$term, 
+  pattern = "TIGHT_JUNCTION|ADHERENS_JUNCTION|CELL_JUNCTION|APICAL_JUNCTION|GAP_JUNCTION|DESMOSOME|CADHERIN")
+
+targeted_pathway = collection_df[targeted_pathway_idx, ]
+targeted_pathway$term = as.character(targeted_pathway$term)
+
+targeted_pathway = targeted_pathway %>%
+  distinct() %>%
+  group_by(term) %>%
+  mutate(nb_gene = n())
+
+# targeted_pathway = targeted_pathway %>%
+#   filter(nb_gene < 100)
+
+```
+
+```{r Select a patway a find allisaes if neeed}
+
+selected_pathway = "HALLMARK_APICAL_JUNCTION"
+
+genes_on_plot <- targeted_pathway %>% filter(term == selected_pathway) 
+genes_on_plot = as.character(genes_on_plot$gene)
+
+missing_genes = setdiff(x = genes_on_plot, y = rownames(sce_comb))
+allias = sapply(missing_genes, function(gene){check_aliase(sce = sce_comb, gene = gene)})
+
+if (length(allias)!=0){
+  genes_on_plot = c(genes_on_plot, allias)
+  genes_on_plot = intersect(rownames(sce_comb), genes_on_plot)
+}else{}
+
+genes_on_plot = unique(genes_on_plot)
+
+```
+
+
+## Dotplot visualization of selected pathway
+
+```{r Dotplot visualization of all pathway between each cluster}
+
+# Create output path
+out_path_dotplot = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_2024_Early_Passage",
+  exp = "7_Epithelial_Interactions_Exploration/Pathway_Dotplot_Gene_Expression"
+)
+
+######################################################
+# Filter expression data for the genes in this pathway
+######################################################
+
+# Subset seurat object
+seurat_comb_heatmap = seurat_comb[genes_on_plot,]
+
+expression_data_subset <- GetAssayData(seurat_comb_heatmap, assay = "originalexp", layer = "data") %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# store cell id to a columns
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("walktrap_30","Culture_Condition") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data_subset <- expression_data_subset %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(Cluster = "walktrap_30", Condition = "Culture_Condition")
+
+# Calculate dotplot summary stats
+dotplot_data <- expression_data_subset %>%
+  group_by(feature, Cluster, Condition) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_expression = mean(expression > 0) * 100,
+    .groups = "drop"
+  ) %>%
+  group_by(Cluster, Condition) %>%
+  mutate(
+    z_score_avg_expression = (avg_expression - mean(avg_expression)) / sd(avg_expression)
+  )
+
+###############################################
+# Shape data : reorder and mutate factor levels
+###############################################
+
+dotplot_data$Cluster <- factor(dotplot_data$Cluster, levels = c(5,7,6,2,3,4,8,1))
+dotplot_data$feature <- factor(dotplot_data$feature, levels = rev(genes_on_plot))
+
+dotplot_data <- dotplot_data %>%
+  mutate(group_condition = paste0("Cluster-", Cluster, "-", Condition)) %>%
+  mutate(group_condition = factor(group_condition, levels = c(
+    "Cluster-5-ECMf", "Cluster-5-Matrigel", "Cluster-7-ECMf", "Cluster-7-Matrigel",
+    "Cluster-6-ECMf", "Cluster-6-Matrigel", "Cluster-2-ECMf", "Cluster-2-Matrigel",
+    "Cluster-3-ECMf", "Cluster-3-Matrigel", "Cluster-4-ECMf", "Cluster-4-Matrigel",
+    "Cluster-8-ECMf", "Cluster-8-Matrigel", "Cluster-1-ECMf", "Cluster-1-Matrigel"
+  )))
+
+##################################
+# Custom color palette for z-score
+##################################
+
+# Calculate color scale breakpoints
+max_value <- max(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+mid_index <- ceiling(length(pal_zscore) / 2)
+
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = length(pal_zscore) - mid_index + 1)[-1]
+)
+
+#################
+# Create the plot
+################
+
+plot <- ggplot(dotplot_data, aes(x = group_condition, y = feature)) + 
+  geom_point(aes(fill = z_score_avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  scale_fill_gradientn(
+    colors = pal_zscore,
+    values = scales::rescale(breakpoints),
+    limits = c(min_value, max_value),
+    name = "Gene expression (Z-Score)"
+  ) +
+  scale_size_continuous(name =  "% of positive cells", range = c(0, 10)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") +
+  ggtitle(label = selected_pathway)
+
+# Save the plot
+file_safe_pathway <- gsub("[^[:alnum:]_]", "_", selected_pathway)
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path_dotplot, time_stamp(), "dotplot_", file_safe_pathway, ".pdf"),
+  width = 8,
+  height = 10 ,
+  device = "pdf"
+)
+
+```
+
+## Heatmap visualization
+
+```{r Heatmap visualization of selected pathway between each cluster}
+
+# Create output path
+out_path_heatmap = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_2024_Early_Passage",
+  exp = "7_Epithelial_Interactions_Exploration/Pathway_Heatmap_Gene_Expression"
+)
+
+
+# Set the seed for reproducibility of the downsampling
+set.seed(123)
+
+# Create a randomly selected sce woith 200 cells per walktrap cluster
+sce_comb_downsampled = downsample_sce(sce = sce_comb, group_column = "walktrap_30", n_per_group = 200)
+
+# Names the rows according the tested genes
+sce_comb_downsampled = sce_comb_downsampled[genes_on_plot, ]
+
+# Order matrix according Malignancy and cluster
+ord <- order(sce_comb_downsampled$Malignancy, sce_comb_downsampled$walktrap_30)
+sce_comb_downsampled = sce_comb_downsampled[,ord]
+
+# MAke a matrix
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled))
+
+# Seurat mtx
+seurat_comb_downsampled_mtx = GetAssayData(
+  object = seurat_comb,
+  assay = "originalexp", 
+  layer = "scale.data")[genes_on_plot, colnames(sce_comb_downsampled_mtx)]
+
+# Clip out extrem values for more meaninful scale
+seurat_comb_downsampled_mtx[seurat_comb_downsampled_mtx > 3] <- 3
+seurat_comb_downsampled_mtx[seurat_comb_downsampled_mtx < -3] <- -3
+
+```
+
+```{r Make heatmap of selected pathway}
+
+sce_comb_downsampled$walktrap_30 = factor(sce_comb_downsampled$walktrap_30, levels = c(5,7,6,2,3,4,8,1))
+sce_comb_downsampled$Malignancy = factor(sce_comb_downsampled$Malignancy, levels = c("Basal/Hillock","Club","Transitioning","Tumor"))
+
+heatmap_anno = HeatmapAnnotation(
+  Clusters = sce_comb_downsampled$walktrap_30, # Has to be a factor
+  Condition = sce_comb_downsampled$Culture_Condition,
+  col = list(
+    Clusters = pal_walktrap_cluster,
+    Condition = pal_culture_condition),  
+  show_legend = c(Clusters = T,Condition = T ), 
+  show_annotation_name = T)
+
+row.fontsize <- ifelse(length(genes_on_plot) >= 200, 3,
+  ifelse(length(genes_on_plot) >= 150, 4,
+                       ifelse(length(genes_on_plot) >= 100, 5, 
+                              ifelse(length(genes_on_plot) >= 50, 6,
+                                     7))))
+
+{
+  
+  pdf(
+    file = paste0(out_path_heatmap,time_stamp(),"plot_Heatmap_cell_cellinteraction_walktrap30.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = seurat_comb_downsampled_mtx,
+    cluster_rows = T,
+    cluster_column_slices = F, # If TRUE it will try to cluster cells
+    cluster_column = F, # If TRUE it will try to cluster cells
+    column_split = sce_comb_downsampled$Malignancy, # Will seperate clusters
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = pal_zscore,
+    # col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+    heatmap_legend_param = list(title = "log2(UMI_count)"),
+    column_title_rot = 45,
+    row_names_gp = grid::gpar(fontsize = row.fontsize)
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+## DE among genes involved in cell-cell-ECM interactions
+
+### Among cell types (Malignancy)
+
+```{r Perform DEA}
+
+Idents(seurat_comb) = "Malignancy"
+
+cell_cell_interaction_Malignancy_DE_Genes <- 
+  FindAllMarkers(
+    seurat_comb[unique(targeted_pathway$gene),],
+    slot = "data",
+    only.pos = T, # True gives only upregulated genes in each cluster against all the others
+    min.pct = 0.75, # Minimum pct of cells expressing the gene in either of the two pop
+    logfc.threshold = 0.75, # Limit testing to genes which show, on average, at least X-fold difference (default)
+    test.use = "wilcox")
+
+# Export the list of genes in seurat and csv
+
+saveRDS(
+  object = cell_cell_interaction_Malignancy_DE_Genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Object_cell_cell_Interaction_Malignany.rds")
+)
+
+write.csv(
+  x = cell_cell_interaction_Malignancy_DE_Genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Table_Cell_Cell_Interaction_Malignany.csv"))
+
+```
+
+#### Dot plot visualization of DE genes
+
+```{r Extract expression data and calculate z-score}
+
+# Extract normalized expression data
+expression_data <- GetAssayData(
+  seurat_comb, 
+  assay = "originalexp", 
+  layer = "data")[cell_cell_interaction_Malignancy_DE_Genes$gene, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Add the identity group column
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("walktrap_30", "Culture_Condition") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(Cluster = "walktrap_30", Condition = "Culture_Condition")
+
+
+# Calculate expression means and their z-scores per GENE
+########################################################
+
+# This aproach makes sens with a larger pool of genes whith the goal of assessing the difference of expression betwwen groups pf cells
+
+dotplot_data <- expression_data %>%
+  group_by(feature, Cluster, Condition) %>%
+  summarize(
+    avg_expression = mean(expression),  # Average expression
+    percent_expression = mean(expression > 0) * 100  # Percentage of expression
+  ) %>%
+  ungroup() %>%
+  group_by(feature) %>% # Z-score calculated among
+  mutate(
+    z_score_avg_expression = (avg_expression - mean(avg_expression)) / sd(avg_expression)  # Z-score of the means
+  )
+
+```
+
+```{r Reorder factors and preapre color scale}
+
+# Order cluster according subtype and condition
+dotplot_data$Cluster = factor(dotplot_data$Cluster, levels = c(5,7,6,2,3,4,8,1))
+
+# Order genes according DE results
+dotplot_data$feature = factor(
+  dotplot_data$feature,
+  levels = unique(cell_cell_interaction_Malignancy_DE_Genes$gene))
+
+# Create a composite variable for group and condition
+dotplot_data <- dotplot_data %>%
+  mutate(group_condition = paste0("Cluster-",Cluster,"-", Condition)) 
+
+dotplot_data$group_condition = factor(
+  dotplot_data$group_condition, 
+  levels = c(
+    "Cluster-5-ECMf", "Cluster-5-Matrigel", "Cluster-7-ECMf", "Cluster-7-Matrigel", "Cluster-6-ECMf", "Cluster-6-Matrigel","Cluster-2-ECMf", "Cluster-2-Matrigel",
+    "Cluster-3-ECMf", "Cluster-3-Matrigel" ,"Cluster-4-ECMf", "Cluster-4-Matrigel", 
+    "Cluster-8-ECMf", "Cluster-8-Matrigel", "Cluster-1-ECMf", "Cluster-1-Matrigel")
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(pal_zscore)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+```
+
+```{r Dot plot visualisation}
+
+plot = ggplot(dotplot_data, aes(x = group_condition, y = feature )) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = pal_zscore,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Gene expression (Z-Score)"
+  ) +  # Customize size scale
+  scale_size_continuous(name =  "% of positive cells", range = c(0, 6)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 7),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_DE_cell_cell_interaction_genes_Malygnacy_Group.pdf"),
+  width = 8,
+  height = 9,
+  device = "pdf")
+
+
+```
+
+### Heatmap visualization
+
+```{r Randomly select 200 cells per walktrap_30 cluster}
+
+# Set the seed for reproducibility of the downsampling
+set.seed(123)
+
+# Create a randomly selected sce woith 200 cells per walktrap cluster
+sce_comb_downsampled = downsample_sce(sce = sce_comb, group_column = "walktrap_30", n_per_group = 200)
+
+# # Extract scale.data
+# seurat_comb_downsampled_mtx = GetAssayData(
+#   object = seurat_comb,
+#   assay = "originalexp", 
+#   layer = "scale.data")[cell_cell_interaction_Malignancy_DE_Genes$gene, colnames(sce_comb_downsampled)]
+
+# Names the rows according the tested genes
+sce_comb_downsampled = sce_comb_downsampled[cell_cell_interaction_Malignancy_DE_Genes$gene, ]
+
+# Order matrix according Malignancy and cluster
+ord <- order(sce_comb_downsampled$Malignancy, sce_comb_downsampled$walktrap_30)
+sce_comb_downsampled = sce_comb_downsampled[,ord]
+
+# MAke a matrix
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled))
+
+# Seurat mtx
+seurat_comb_downsampled_mtx = GetAssayData(
+  object = seurat_comb,
+  assay = "originalexp", 
+  layer = "scale.data")[cell_cell_interaction_Malignancy_DE_Genes$gene, colnames(sce_comb_downsampled_mtx)]
+
+# Clip out extrem values for more meaninful scale
+seurat_comb_downsampled_mtx[seurat_comb_downsampled_mtx > 3] <- 3
+seurat_comb_downsampled_mtx[seurat_comb_downsampled_mtx < -3] <- -3
+
+```
+
+```{r Make heatmap}
+
+sce_comb_downsampled$walktrap_30 = factor(sce_comb_downsampled$walktrap_30, levels = c(5,7,6,2,3,4,8,1))
+sce_comb_downsampled$Malignancy = factor(sce_comb_downsampled$Malignancy, levels = c("Basal/Hillock","Club","Transitioning","Tumor"))
+
+heatmap_anno = HeatmapAnnotation(
+  Clusters = sce_comb_downsampled$walktrap_30, # Has to be a factor
+  Condition = sce_comb_downsampled$Culture_Condition,
+  col = list(
+    Clusters = pal_walktrap_cluster,
+    Condition = pal_culture_condition),  
+  show_legend = c(Clusters = T,Condition = T ), 
+  show_annotation_name = T)
+
+{
+  
+  pdf(
+    file = paste0(out_path,time_stamp(),"plot_Heatmap_cell_cellinteraction_walktrap30.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = seurat_comb_downsampled_mtx,
+    cluster_rows = F,
+    cluster_column_slices = F, # If TRUE it will try to cluster cells
+    cluster_column = F, # If TRUE it will try to cluster cells
+    column_split = sce_comb_downsampled$Malignancy, # Will seperate clusters
+    row_split = cell_cell_interaction_Malignancy_DE_Genes$cluster,
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = pal_zscore,
+    # col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "log2(UMI_count)"),
+    column_title_rot = 45,
+    row_title_rot = 0
+    
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+# Pathway overdispersion
+
+```{r}
+
+devtools::install_github("kharchenkolab/pagoda2")
+
+```

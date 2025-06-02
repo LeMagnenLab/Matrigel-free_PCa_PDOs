@@ -1,0 +1,175 @@
+---
+title: "4.Dolgos Early Passage PDOs & Henry_2018 (Normal Tissue) & Tabula_sapiens (Normal Tissue):  gene_expression_visualization"
+author: "Romuald Parmentier"
+date: "2024-10-27"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "Dolgos_PDOs_Early-Henry_Tissue-Tabula_Tissue",
+  exp = "4_gene_expression_visualization"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early-Henry_Tissue-Tabula_Tissue",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced.rds")
+
+sce_comb = readRDS(file_path)
+
+```
+
+```{r Prepare gene to show}
+
+# Genes picked in the
+genes_DE_Matrigel = c("KRT6A", "KRT19", "KRT5", "S100A2", "S100A14", 
+                      "LGALS1", "FGFBP1", "KRT17", "DSC3", "EIF1", "SFN", 
+                      "RACK1", "GSTP1", "S100A10")
+
+# Genes picked in the keratinocyte differentiation GOBP
+genes_keratinocytes <- c("CD109", "CSTA", "JAG1", "DSP", "CERS3", "EREG", "ALOX15B", 
+                         "KLK5", "SFN", "IVL", "KRT5", "KRT6A", "KRT6B", "KRT10", 
+                         "KRT14", "KRT16", "KRT17", "TP63")
+```
+
+
+```{r Prepare dotplot table}
+
+# Check presence in sce object
+absent_in_sce_comb_DE_Matrigel <- setdiff(genes_DE_Matrigel, rownames(sce_comb))
+absent_in_sce_comb_keratinocytes <- setdiff(genes_keratinocytes, rownames(sce_comb))
+
+# Asseble both list
+all_genes = c(genes_DE_Matrigel, genes_keratinocytes)
+
+# Make a df with all genes assembled
+dotplot_df = tibble(
+  Dataset_Cell_Type = rep(x = unique(sce_comb$Dataset_Cell_Type), each = length(all_genes)),
+  genes = rep(x = all_genes, length(unique(sce_comb$Dataset_Cell_Type))))
+
+# Add a category
+dotplot_df = dotplot_df %>%
+  mutate(genes_origin = case_when(
+    genes %in% genes_DE_Matrigel ~ "genes_DE_Matrigel",
+    genes %in% genes_keratinocytes ~ "genes_keratinocytes"
+  ))
+
+```
+
+```{r Make a tibble with pct.pos and avg_log2 expression}
+
+calculate_metrics <- function(sce, gene) {
+  
+  # Subset expression data for the gene
+  expr <- assay(sce, "counts")[gene, ]
+  
+  # Calculate proportion of positive cells
+  pct_positive <- sum(expr > 0) / length(expr) * 100
+  
+  # Calculate average log2 expression (only on positive cells)
+  avg_log2_expr <- mean(assay(sce, "logcounts")[gene, ])
+  
+  return(tibble(
+    pct_positive = pct_positive,
+    average_log2_expression = avg_log2_expr
+  ))
+  
+}
+
+# Calculate the metrics for each gene and group
+dotplot_df <- dotplot_df %>%
+  group_by(Dataset_Cell_Type, genes) %>% # Rowwise will act as a grouo_by
+  mutate(
+    metrics = list(calculate_metrics(
+      sce = sce_comb[, colData(sce_comb)$Dataset_Cell_Type == Dataset_Cell_Type],
+      gene = genes
+    ))
+  ) 
+
+dotplot_df = dotplot_df %>%
+  tidyr::unnest(metrics)
+
+# Save table
+write.csv(
+  x = dotplot_df,
+  file = paste0(out_path, time_stamp(),"Keratinocyte_diff_&_Matrigel_DE_Genes_Statistics_Table.csv"))
+
+
+```
+
+# Visualization
+
+```{r Dot plot gene expression =  Fig4.E}
+
+# Reorder genes and datasets/cell_type
+dotplot_df$genes = factor(x = dotplot_df$genes, levels = unique(all_genes))
+
+
+for (list in c("genes_DE_Matrigel", "genes_keratinocytes")) {
+  
+  df = dotplot_df %>%
+    filter(genes_origin == list)
+  
+  # Filter the data frame to remove rows where average_log2_expression is 0
+  df_filtered <- df %>% 
+    filter(pct_positive > 2)
+  
+  plot = ggplot(df_filtered, aes(x = Dataset_Cell_Type, y = genes)) +
+    geom_point(shape = 21,
+               aes(size = pct_positive, fill = average_log2_expression),
+             stroke = 0.5) +
+    # scale_size(range = c(1, 10)) +
+      scale_size(range = c(1, 10), 
+             breaks = c(0, 25, 50, 75, 100), # Explicitly set breaks for the size scale
+             limits = c(0, 100))+
+    scale_fill_gradientn(colors = c("lightgrey", rev(paletteer_c("viridis::magma", 30)))) +  
+    theme_minimal() +
+    labs(title = "Dotplot of Gene Expression",
+         x = "Genes",
+         y = "Dataset_Cell_Type",
+         size = "Percentage Positive",
+         color = "Average Log2 Expression") +
+    ggtitle(label = list) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  ggsave(plot = plot,
+         filename = paste0(out_path, time_stamp(), "dotplot_Matrigel_Up_Henry_Tabula_vs_MAtrigel_ECMF_",list,".pdf"),
+         device =   "pdf",
+         width = 10 ,
+         height = 8)
+
+}
+
+```
+
+```{r Violin plots}
+
+scater::plotExpression(object = sce_comb, x = "Cell_Type", features = "KRT5", colour_by ="Cell_Type") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+scater::plotExpression(object = sce_comb, x = "cell_type_dataset", features = "KRT5") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```

@@ -1,0 +1,625 @@
+---
+title: '5.Dolgos early passage PDOs: gene signature score'
+author: "Romuald Parmentier"
+date: "2024-10-10"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(AnnotationHub)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  exp = "5_signature_score"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Perform signature score
+
+```{r HALLMARK prostate cancer signatures = Supp.Fig4.A}
+
+# Define the list of panels
+panels = c(
+  "C2" = "LIU_PROSTATE_CANCER_UP",
+  "C2" = "LIU_PROSTATE_CANCER_DN",
+  "C2" = "TOMLINS_PROSTATE_CANCER_UP",
+  "C2" = "TOMLINS_PROSTATE_CANCER_DN",
+  "C2" = "WALLACE_PROSTATE_CANCER_UP",
+  "C2" = "WALLACE_PROSTATE_CANCER_DN",
+  "H" = "HALLMARK_ANDROGEN_RESPONSE",
+  "H" = "HALLMARK_MYC_TARGETS_V1",
+  "H" = "HALLMARK_MITOTIC_SPINDLE",
+  "H" = "HALLMARK_E2F_TARGETS",
+  "H" = "HALLMARK_G2M_CHECKPOINT",
+  "C5" = "GOBP_KERATINOCYTE_DIFFERENTIATION"
+)
+
+panel_id = 1
+# Iterate over each panel in the list
+
+for (panel_name in panels) {
+  
+  print(paste0("Calculate gene signature for ", panel_name))
+  
+  # Make a table with all genes belonging to the signature of interest
+  gene_panel = get_signature_data(
+    pathway_proxy = panel_name, MSigDB_category = names(panels)[panel_id]
+  )
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  min_max_outliers = get_signature_score_outliers( 
+    sce_object = sce_comb,
+    sce_signature_column = paste0(panel_name, "_score"),
+    signature_name = panel_name,
+    nb_outliers = 1
+  )
+  
+  panel_id = panel_id + 1
+  
+}
+
+```
+
+```{r Hirz_2023 cell type signature}
+
+# Define the list of panels
+custom_panels = list(
+  "Hirz_Epithelial_Club" =  tibble(
+    NAME = "Hirz_Epithelial_Club",
+    SYMBOL = c("SCGB3A1", "WFDC2", "LCN2", "MMP7", "KRT4", "TACSTD2", "SCGB3A1"),
+  ),
+  "Hirz_Epithelial_Hillock" = tibble(
+    NAME = "Hirz_Epithelial_Hillock",
+    SYMBOL = c("KRT13", "S100A16", "S100A14", "KRT19")
+  ),
+  "Hirz_Epithelial_Basal" = tibble(
+    NAME = "Hirz_Epithelial_Basal",
+    SYMBOL = c("TP63", "KRT14", "KRT5")
+  ),
+  "Hirz_Epithelial_Luminal" = tibble(
+    NAME = "Hirz_Epithelial_Luminal",
+    SYMBOL = c("KLK4", "KLK3", "KLK2", "ACP3", "AR")
+  ),
+  "Hirz_Epithelial_Tumor" = tibble(
+    NAME = "Hirz_Epithelial_Tumor",
+    SYMBOL = c("AMACR", "CACNA1D", "PCA3", "ERG", "FABP5", "COL9A2", "GCNT1", "PHGR1")
+  )
+)
+
+## Load the annotation resource
+EnsDb.Hsapiens.v104 <- AnnotationHub()[["AH95744"]]
+
+custom_panels <- lapply(custom_panels, function(panel_df) {
+  # Map ENSEMBL ID for each SYMBOL in the panel
+  panel_df$ENTREZID <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = panel_df$SYMBOL,  # Using SYMBOL column in each tibble
+    keytype = "SYMBOL",
+    column = "ENTREZID",
+    multiVals = "first"  # To handle multiple mappings if necessary
+  )
+  return(panel_df)
+})
+
+
+# Iterate over each panel in the list
+for (panel in custom_panels) {
+  
+  panel_name = unique(panel$NAME)
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  min_max_outliers = get_signature_score_outliers( 
+    sce_object = sce_comb,
+    sce_signature_column = paste0(panel_name, "_score"),
+    signature_name = panel_name,
+    nb_outliers = 1
+  )
+  
+}
+
+```
+
+```{r Load and structure AR downstream targets (TRUUST Database)}
+
+AR_targets_human <- read_delim("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/TRUUST_DB_AR_targets_human.tsv", 
+                               delim = "\t", escape_double = FALSE, 
+                               trim_ws = TRUE)
+
+AR_targets_human_activated = AR_targets_human %>%
+  dplyr::filter(Type == "Activation") %>%
+  dplyr::select(c("# TF","Target","Type"))
+
+AR_targets_human_repressed = AR_targets_human %>%
+  dplyr::filter(Type == "Repression") %>%
+  dplyr::select(c("# TF","Target","Type"))
+
+AR_targets_human_unknown = AR_targets_human %>%
+  dplyr::filter(Type == "Unknown") %>%
+  dplyr::select(c("# TF","Target","Type"))
+
+# Define panel of genes to test
+
+custom_panels = list(
+  "AR_targets_human_activated" =  tibble(
+    NAME = "AR_targets_human_activated",
+    SYMBOL = AR_targets_human_activated$Target),
+  "AR_targets_human_activated_and_unknown" =  tibble(
+    NAME = "AR_targets_human_activated_and_unknown",
+    SYMBOL = c(AR_targets_human_activated$Target, AR_targets_human_unknown$Target)),
+  "AR_targets_human_repressed" =  tibble(
+    NAME = "AR_targets_human_repressed",
+    SYMBOL = AR_targets_human_repressed$Target),
+  "AR_targets_human_unknown" =  tibble(
+    NAME = "AR_targets_human_unknown",
+    SYMBOL = AR_targets_human_unknown$Target)
+)
+
+```
+
+```{r AR downstream targets (TRUUST Database) signaure}
+
+## Load the annotation resource
+EnsDb.Hsapiens.v104 <- AnnotationHub()[["AH95744"]]
+
+custom_panels <- lapply(custom_panels, function(panel_df) {
+  # Map ENSEMBL ID for each SYMBOL in the panel
+  panel_df$ENTREZID <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = panel_df$SYMBOL,  # Using SYMBOL column in each tibble
+    keytype = "SYMBOL",
+    column = "ENTREZID",
+    multiVals = "first"  # To handle multiple mappings if necessary
+  )
+  return(panel_df)
+})
+
+
+# Iterate over each panel in the list
+for (panel in custom_panels) {
+  
+  panel_name = unique(panel$NAME)
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  # min_max_outliers = get_signature_score_outliers( 
+  #   sce_object = sce_comb,
+  #   sce_signature_column = paste0(panel_name, "_score"),
+  #   signature_name = panel_name,
+  #   nb_outliers = 1
+  # )
+  
+}
+
+```
+
+# Visualizing signature scores
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+## HALLMARK signatures
+
+```{r Violin plot of HALLMARK signatures = Fig3.F / Supp.Fig4A / Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+panels = c(
+  "LIU_PROSTATE_CANCER_UP_score",
+  "LIU_PROSTATE_CANCER_DN_score",
+  "TOMLINS_PROSTATE_CANCER_UP_score",
+  "TOMLINS_PROSTATE_CANCER_DN_score",
+  "WALLACE_PROSTATE_CANCER_UP_score",
+  "WALLACE_PROSTATE_CANCER_DN_score",
+  "HALLMARK_ANDROGEN_RESPONSE_score",
+  "GOBP_KERATINOCYTE_DIFFERENTIATION_score",
+  "HALLMARK_ANDROGEN_RESPONSE_score",
+  "HALLMARK_MYC_TARGETS_V1_score",
+  "HALLMARK_MITOTIC_SPINDLE_score",
+  "HALLMARK_E2F_TARGETS_score",
+  "HALLMARK_G2M_CHECKPOINT_score",
+)
+
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  plot <- ggplot(md, aes(x = walktrap_30, y = .data[[panel_name]], fill = walktrap_30)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_walktrap_cluster, name = "walktrap_30") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+```{r Single UMAP colored with HALLMARK signature score = Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+panels = c( "LIU_PROSTATE_CANCER_UP_score",
+            "HALLMARK_ANDROGEN_RESPONSE_score",
+            "GOBP_KERATINOCYTE_DIFFERENTIATION_score")
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md,
+        aes(x = UMAP_1, y = UMAP_2, fill = .data[[panel_name]]), 
+        alpha = 0.7, size = 1.3, 
+        shape = 21,
+        color = "gray10",
+        stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+      dpi = 300, scale = 1) +
+    # Create a continuous gradient for the fill color
+    scale_fill_gradientn(colors = c("lightgrey", "lightgrey", "#FF7078FF", "#69000CFF"),  # Grey to red gradient
+                         values = scales::rescale(c(-0.15,0.20, 0.35, 1))) +
+    theme_classic() + # Set limits
+    labs(title = panel_name,
+         fill = "Score") +  # Change the legend title
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plot_UMAP_", panel_name, ".pdf"),
+    device = "pdf",
+    width = 10,
+    height = 8,
+  )
+  
+}
+
+```
+
+## Hirz cell_type signatures
+
+```{r Violin plot of Hirz_2023 signatures}
+
+# Iterate over each panel in the list
+for (panel_name in names(custom_panels)) {
+  
+  panel_name = paste0(panel_name,"_score")
+  
+  plot <- ggplot(md, aes(x = walktrap_30, y = .data[[panel_name]], fill = walktrap_30)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_walktrap_cluster, name = "walktrap_30") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+## AR downstream targets
+
+```{r Violin plot of AR downstream targets signatures}
+
+# Iterate over each panel in the list
+for (panel_name in names(custom_panels)) {
+  
+  panel_name = paste0(panel_name,"_score")
+  
+  plot <- ggplot(md, aes(x = walktrap_30, y = .data[[panel_name]], fill = walktrap_30)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_walktrap_cluster_old, name = "walktrap_30") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score") +
+    stat_compare_means(
+    method = "anova",
+    label.y = 0.8,
+    label.x = 0.8
+  ) + stat_compare_means(aes(label = after_stat(p.signif)),
+                  method = "t.test", ref.group = "7", label.y = 0.7)
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+```{r Ridge plot of AR downstream targets signatures}
+
+for (panel_name in names(custom_panels)) {
+  
+  # Compute column name for the current score
+  score_column <- paste0(panel_name, "_score")
+  
+  # If coloring the ridge plots by mean score
+  ###########################################
+  
+  # Calculate mean score for each walktrap_30 cluster
+  
+  # mean_scores <- md %>%
+  #   group_by(walktrap_30) %>%
+  #   summarize(mean_score = mean(.data[[score_column]], na.rm = TRUE)) %>%
+  #   ungroup()
+  # 
+  # # Merge mean scores back into the metadata (md)
+  # md <- left_join(md, mean_scores, by = "walktrap_30")
+  
+  # Create ridge plot
+  plot <- ggplot(md, aes(
+    x = .data[[score_column]], 
+    y = factor(walktrap_30, levels = rev(unique(walktrap_30))), 
+    fill = walktrap_30,
+    # fill = mean_score # If coloring the ridge plots by mean score
+  )) +
+    geom_density_ridges(
+      scale = 1, 
+      rel_min_height = 0.01, 
+      alpha = 0.8
+    ) +
+    # scale_fill_viridis_c(option = "magma", name = "Mean Score") + #If coloring the ridge plots by mean score
+    scale_fill_manual(values = pal_walktrap_cluster_old) +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12), 
+      axis.text = element_text(size = 10),
+      axis.line = element_line(size = 0.5),
+      axis.ticks = element_line(size = 0.5)
+    ) +
+    labs(
+      title = paste(panel_name, "Score Distribution"),
+      x = "Signature Score",
+      y = "Walktrap Cluster"
+    )
+  
+  # Remove the mean_Score column other conflict on the next round of for loop
+  # md = md %>% select(-mean_score) #If coloring the ridge plots by mean score
+  
+  # Save the plot
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path, time_stamp(), "plots_Ridge_Scores_", panel_name, ".pdf"),
+    device = "pdf",
+    width = 6,
+    height = 8,
+  )
+}
+
+```
+
+```{r Heatmaps  of AR downstream targets signatures}
+
+for (panel_name in names(custom_panels)) {
+  
+  panel_name = paste0(panel_name,"_gene")
+  
+  # Select genes 
+  genes = rownames(sce_comb)[rowData(sce_comb)[[panel_name]]]
+  
+  # Extract the matrix with logcounts of selected genes only
+  sce_comb_mtx = as.matrix(logcounts(sce_comb[genes, ]))
+  
+  heatmap_anno = HeatmapAnnotation(
+    walktrap_30 = factor(sce_comb$walktrap_30, levels = unique(sce_comb$walktrap_30)),
+    col = list(
+      walktrap_30 = pal_walktrap_cluster),  
+    show_legend = c(PDO_Line = T), 
+    show_annotation_name = T)
+  
+  {
+    
+    pdf(
+      file = paste0(out_path,time_stamp(),"plot_Heatmap_top10_genes_",panel_name,".pdf"),
+      width = 10, height = 8)
+    
+    print(Heatmap( 
+      top_annotation = heatmap_anno,
+      matrix = sce_comb_mtx,
+      cluster_rows = T,
+      cluster_columns = T,
+      show_parent_dend_line = T, 
+      column_title = NULL,# If TRUE it will try to cluster cells
+      column_split = sce_comb$walktrap_30, # Will seperate clusters
+      show_column_dend = T, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+      show_column_names = F, # This will make cell names appear in this case (should remain F)
+      show_row_dend = T,
+      use_raster = TRUE,
+      col = c("lightgrey",rev(paletteer_c("viridis::magma", 30))), # or col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+      row_names_gp = grid::gpar(fontsize = 5),
+      heatmap_legend_param = list(title = "log2(UMI_count)")
+    ))
+    
+    dev.off()
+    
+  }
+  
+}
+
+
+```
+
+# Export files
+
+```{r Export sce object with signature scores }
+
+# Clustering takes a lot of time, better to export sce object here
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_signature_score.rds")
+)
+
+```
+
+
+

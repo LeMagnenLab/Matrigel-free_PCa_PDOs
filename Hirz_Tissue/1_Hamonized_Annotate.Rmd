@@ -1,0 +1,219 @@
+---
+title: 'Hirz_2022: Harmonization and annotation'
+author: "Romuald Parmentier"
+date: "2024-11-15"
+output: html_document
+---
+
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(stringr)
+library(dplyr)
+library(SingleCellExperiment)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  organ = "Prostate" ,
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  exp = "harmonization_annotation"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+main_dir = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Pre_Processed_Data/Hirz_2022"
+
+# Load count table files
+########################
+
+count_files <- list.files(
+  path = paste0(main_dir, "/counts_tables"),
+  pattern = ".csv",
+  full.names = T)
+  
+
+# Load Metadata table for all samples
+#####################################
+
+metadata = read.table(
+  file = paste0(main_dir,"/SRA_Metadata_Table.txt"), 
+  sep = ",", 
+  header = TRUE)
+
+# Load cell type annotation table 
+#################################
+
+annotations = read.csv(
+  file = paste0(main_dir,"/GSE181294_scRNAseq.ano.csv"), 
+  header = TRUE)
+
+```
+
+# Merging annotation and count tables
+
+No need to to quality controls here as only cells with annotation will be retained
+
+```{r Reshaping annotations names}
+
+# Add a broader class of annotations
+annotations = annotations %>% 
+  mutate(cell_type_broad = case_when(
+    cells %in% c("CTL-1", "CTL-2","CD8+ effector","Cycling T") ~ "Cytotoxic_T_Cells",
+    cells %in% c("Th1", "Th17", "Naive Th") ~ "T_Helper_Cells",
+    cells %in% c("NK","TNK") ~ "Natural_Killer_Lymphocytes",
+    cells == "Treg"~ "Regulatory_T_cells",
+    cells %in% c("Macrophage1", "Macrophage2","Macrophage3") ~ "Macrophages",
+    cells %in% c("Pericytes-1","Pericytes-2") ~ "Pericytes",
+    cells %in% c("Mono1","Mono2","Mono3") ~ "Monocytes",
+    cells %in% c("Endothelial cells-1","Endothelial cells-2") ~ "Endothelial",
+    cells == "Epitheial_Luminal" ~ "Epithelial_Luminal",
+    cells == "Epitheial_Basal" ~ "Epithelial_Basal",
+    cells == "Epitheial_Hillock" ~ "Epithelial_Hillock",
+    cells == "Epitheial_Club" ~ "Epithelial_Club",
+    cells %in% c("mDC", "PDC") ~ "Dendritic_Cells",
+    cells == "plasma cells" ~ "Plasmocytes",
+    cells == "Mast cells" ~ "Mastocytes",
+    cells == "Tumor" ~ "Epithelial_Tumor",
+    cells == "B cells" ~ "B_Cells",
+    TRUE ~ cells))
+  
+annotations = annotations %>% 
+  mutate(cells = case_when(
+  cells == "CTL-1" ~ "Cytotoxic_T_Lymphocytes_1",
+  cells == "CTL-2" ~ "Cytotoxic_T_Lymphocytes_2",
+  cells == "Th1" ~ "T_Helper_Lymphocytes_1",
+  cells == "Th17" ~ "T_Helper_Lymphocytes_17",
+  cells == "Naive Th" ~ "Naive_T_Helper_Lymphocytes",
+  cells == "NK" ~ "Natural_Killer_Lymphocytes",
+  cells == "TNK" ~ "T_Natural_Killer_Lymphocytes",
+  cells == "CD8+ effector" ~ "Cytotoxic_T_Lymphocytes_CD8",
+  cells == "mDC" ~ "Myeloid_Dendritic",
+  cells == "PDC" ~ "Plasmacytoid_Dendritic",
+  cells == "plasma cells" ~ "Plasmocytes",
+  cells == "Mast cells" ~ "Mastocytes",
+  cells == "Mono1" ~ "Monocytes_1",
+  cells == "Mono2" ~ "Monocytes_2",
+  cells == "Mono3" ~ "Monocytes_3",
+  cells == "Endothelial cells-1" ~ "Endothelial_1",
+  cells == "Endothelial cells-2" ~ "Endothelial_2",
+  cells == "Macrophage1" ~ "Macrophages_1",
+  cells == "Macrophage2" ~ "Macrophages_2",
+  cells == "Macrophage3" ~ "Macrophages_3",
+  cells == "Treg" ~ "Regulatory_T_cells",
+  cells == "Cycling T" ~ "Cycling_T_cells",
+  cells == "Tumor" ~ "Epithelial_Tumor",
+  cells == "Epitheial_Luminal" ~ "Epithelial_Luminal",
+  cells == "Epitheial_Basal" ~ "Epithelial_Basal",
+  cells == "Epitheial_Hillock" ~ "Epithelial_Hillock",
+  cells == "Epitheial_Club" ~ "Epithelial_Club",
+  TRUE ~ cells)
+)
+
+annotations$cell_type_broad = as.character(annotations$cell_type_broad)
+annotations$cells = as.character(annotations$cells)
+
+```
+
+```{r Merge count tables & metadta & annotations and create list of sce}
+
+# Initialize the list to store SCE objects
+list_sce <- list()
+
+# Loop over the count table files
+for (file in 1:length(count_files)) {
+  
+  # Read the count table file
+  count_file <- count_files[file]
+  
+  # Sample_name
+  GSM_ID <- sub(".*/([^_/]+).*", "\\1", count_files[file])
+  
+  # Show progress
+  print(paste("Generating sce object for sample", GSM_ID))
+  
+  # Extract counts
+  count_data <- readr::read_csv(count_file, show_col_types = FALSE)
+  colnames(count_data)[1] = "SYMBOL"
+  counts <- as.matrix(count_data[, -1], )  # Remove the first column if it contains row names
+  
+  # Extract the sample name before the underscore
+  sample_name <- str_extract(colnames(count_data)[2], ".*(?=_)")
+  
+  # Extract the gene names from the first column
+  gene_names <- count_data$SYMBOL
+  
+  # Create the SCE object
+  sce <- SingleCellExperiment(
+    assays = list(counts = counts),
+    rowData = gene_names
+  )
+  
+  # Set rownames as SYMBOL
+  rownames(sce) = gene_names
+  
+  # Rename the first column of rowData
+  colnames(rowData(sce))[1] = "SYMBOL"
+ 
+  
+  # Add metadata if available
+  metadata_sub = metadata %>% dplyr::filter(Library.Name == GSM_ID) %>% dplyr::select(grade, Age, gleason)
+  metadata_sub = metadata_sub[1,]
+  
+  # Adding metadata
+  
+  sce$GSM_ID = GSM_ID
+  sce$Sample_ID = sample_name
+  sce$Age = metadata_sub$Age
+  sce$Grade = metadata_sub$grade
+  sce$Gleason = metadata_sub$gleason
+  
+  # Selecting cells from annotations matching with cell in the sce
+  ind = which(colnames(sce) %in% annotations$X)
+  sce = sce[,ind]
+  
+  # Subset annotations df with cells found in sce, keep the same order than sce thanks to match
+  anno_sub = annotations[match(colnames(sce), annotations$X), ]
+  
+  # Add cell_type to sce object
+  sce$cell_type = anno_sub$cells
+  sce$cell_type_broad = anno_sub$cell_type_broad
+
+  
+  # Store the SCE object in the list
+  list_sce[[file]] <- sce
+  
+  names(list_sce)[file] = sample_name
+  
+}
+
+```
+
+```{r Reorder features among sce of the list}
+
+list_sce = restrict_reorder_features_names(list_sce)
+
+```
+
+
+# Export files
+
+```{r}
+
+saveRDS(
+  object = list_sce,
+  file = paste0(out_path,time_stamp(),"list_sce_harmonized_annotated.rds"))
+
+```
+
+
+

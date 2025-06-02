@@ -1,0 +1,409 @@
+---
+title: "3.McCray_2019 (PDOs): Dimension reduction"
+author: "Romuald Parmentier"
+date: "2024-09-19"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+library(scran)
+library(scater)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "McCray_PDOs",
+  exp = "3_dimension_reduction"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce object after normalization
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "McCray_PDOs",
+  prev_exp = "2_normalization",
+  pattern = "sce_normalized.rds")
+
+sce = readRDS(file_path)
+
+```
+
+# Select variable genes
+
+```{r variance modeling for the entire batch}
+
+# Gene variance modelling accross cells
+var_model = modelGeneVar(sce)
+
+# Get top 1000 most variable genes
+chosen.hvgs <- getTopHVGs(var_model, n = 1000)
+
+
+# Identify top 1000 hvg in rowData
+rowSubset(sce, "hvg_top_n1000") <- chosen.hvgs
+
+# Visualizing the fit:
+fit_sce <- metadata(var_model)
+
+hvg_indices <- match(chosen.hvgs, names(fit_sce$mean))
+
+{
+  
+  pdf(file = paste0(out_path, time_stamp(),"plot_var_vs_log_expression.pdf"),
+      width = 8,
+      height = 8)
+  
+  # Create the base plot
+  plot(fit_sce$mean, 
+       fit_sce$var, 
+       xlab = "Mean of log-expression", 
+       ylab = "Variance of log-expression")
+  
+  # Add the trend line
+  curve(fit_sce$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+  
+  # Highlight the HVGs in red
+  points(fit_sce$mean[hvg_indices], 
+         fit_sce$var[hvg_indices], 
+         col = "red", 
+         pch = 1) # 'pch' specifies the type of point, 16 is a filled circle
+  
+  dev.off()
+  
+}
+
+```
+
+# Principal component analysis (PCA)
+
+```{r Run PCA}
+
+# Calculate 100 first dimensions of PCA using top 1000 hvg genes
+sce <- fixedPCA(sce, rank = 100,
+                     name = "PCA_hvg_top_n1000" , 
+                     subset.row = rowSubset(sce, "hvg_top_n1000"))
+
+```
+
+```{r PCA loadings}
+
+# Export PCA dims
+PCA = reducedDim(sce, "PCA_hvg_top_n1000")
+
+# Export PCA loadings
+PCA_loadings = attr(PCA, "rotation")
+
+# Make a tiblle with of PCA loadings
+PC_loadings_df = as_tibble(PCA_loadings)
+colnames(PC_loadings_df) = paste0("PC", 1:ncol(PCA_loadings))
+rownames(PC_loadings_df) = rownames(PCA_loadings)
+
+# Reshape from wide to long format
+PC_loadings_df_long <- PC_loadings_df %>%
+  mutate(gene = rownames(PC_loadings_df)) %>%
+  tidyr::pivot_longer(cols = -gene, names_to = "PCs", values_to = "Loading")
+
+# Calculate absolute values and arrange in descending order
+top_PC_loadings <- PC_loadings_df_long %>%
+  mutate(abs_loadings = abs(Loading)) %>%
+  group_by(PCs) %>%
+  arrange(desc(abs_loadings)) %>%
+  slice_head(n = 20)   
+
+###################################
+### Plot 20 first PCS loadings ####
+###################################
+
+plot_list = list()
+PC_id = 1
+
+PCs = paste0("PC",1:20)
+
+for(PC in PCs){
+  
+  top_PC_loadings_subset = top_PC_loadings %>%
+    dplyr::filter(PCs == PC) %>%
+    mutate(gene = factor(gene, levels = gene[order(abs_loadings, decreasing = F)]))  # Set factor levels based on decreasing order of loadings
+  
+  # Create a bar plot for top PCA loadings, separated by principal components
+  plot = ggplot(top_PC_loadings_subset, aes(x = Loading , y = gene)) +  # 'gene' should be the identifier for rows/features
+    geom_col() +
+    labs(title = paste0("Top 20 loadings for PC", PC_id),
+         x = "Loadings",
+         y = "Gene") +
+    theme_minimal() 
+  
+  plot_list[[PC_id]] = plot
+  PC_id = PC_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 3, ncol = 3)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plot_20PCs_loadings.pdf"),
+  device = "pdf",
+  height = 12,
+  width = 10
+)
+
+```
+
+```{r Captured variance, warning = FALSE}
+
+# Retrieve the % of variance explained by the PCS
+percent.var <- attr(PCA, "percentVar")
+
+###################################
+# Explained variance by each PC ###
+###################################
+
+{
+  
+  pdf(file = paste0(out_path, time_stamp(),"plot_explained_variance_PC.pdf"),
+      width = 8,
+      height = 8)
+  
+  plot(x = percent.var, 
+       main = paste0("Explained variance by PC)",
+                     "\n",
+                     "Gene subset for Dim reduction : 1000"), 
+       log = "y", 
+       xlab = "PC", 
+       ylab = "Variance explained (%)",
+       cex.main = 0.9)
+  
+  dev.off()
+  
+}
+
+###############################################
+# Cumulative variance explained by the PCs ###
+##############################################
+
+{
+  
+  pdf(file = paste0(out_path, time_stamp(),"plot_cum_variance_PC.pdf"),   
+      width = 8, 
+      height = 8) 
+  
+  x = 1:100
+  y = percent.var
+  plot(x,cumsum(y),
+       main = paste0("Cumulative sum of variance",
+                     "\n",
+                     "Gene subset for Dim reduction : 1000"),      
+       xlab = "Principal Components")
+  
+}
+
+```
+
+
+```{r Check correlation between seq depth and first PCS, warning = FALSE}
+
+# Store depth as the sum of counts for each cell (2 = sum of rows)
+depth <- apply(counts(sce), 2, sum)
+
+paste("Correlation between PC1 and sequenging depth with the raw data is:", 
+      round(abs(cor(PCA[,1], depth)), digits = 2))
+
+paste("Correlation between PC2 and sequenging depth with the raw data is:",
+      round(abs(cor(PCA[,2], depth)), digits = 2))
+
+paste("Correlation between PC3 and sequenging depth with the raw data is:", 
+      round(abs(cor(PCA[,3], depth)), digits = 2))
+
+paste("Correlation between PC4 and sequenging depth with the raw data is:", 
+      round(abs(cor(PCA[,4], depth)), digits = 2))
+
+# Print % of variance explained by X PCs
+########################################
+
+print(paste(round(cumsum(y)[100],0),"% of variance capture by the first", 100, "PCs")) 
+print(paste(round(cumsum(y)[20],0),"% of variance capture by the first", 20, "PCs")) 
+print(paste(round(cumsum(y)[10],0),"% of variance capture by the first", 10, "PCs")) 
+
+
+# Creating a new entry with only the PC 
+reducedDim(sce, "PCA.1-20") <- reducedDim(sce,"PCA_hvg_top_n1000")[,1:20]
+reducedDim(sce,"PCA_hvg_top_n1000") = NULL
+
+```
+
+```{r Plot 4 first PCs of PCA}
+
+PC_list = list(
+  1:2, 
+  2:3, 
+  3:4)
+
+PC_names = list(
+  c("PCA_1", "PCA_2"),
+  c("PCA_2", "PCA_3"),
+  c("PCA_3", "PCA_4"))
+
+plot_list = list()
+
+for(PC_id in 1:length(PC_names)){
+  
+  # get metadata
+  md <- as_tibble(colData(sce))
+  
+  # get embeddings from 2 first PC
+  coords <- as_tibble(reducedDim(sce, "PCA.1-20"))[,PC_list[[PC_id]]]
+  colnames(coords) = PC_names[[PC_id]]
+  
+  # combine dataframes
+  md <- cbind(md, coords)
+  
+  ###############
+  ## Plotting ##
+  ###############
+  
+  PC_x = PC_names[[PC_id]][1]
+  PC_y = PC_names[[PC_id]][2]
+  
+  # plot
+  plot_list[[PC_id]] <- ggplot(md, aes(x = .data[[PC_x]], y = .data[[PC_y]] )) +
+    geom_point(stroke = 0.5, alpha = 0.5) +
+    ggtitle(
+      label =  paste("PCA without batch correction:", paste(PC_names[PC_id],collapse = "_")),
+      subtitle = "1000 HVG & 20PCs")
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plot_PCs_No_BatchCorrection.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 12,
+)
+
+```
+
+# Uniform Manifold Approximation and Projection (UMAP) 
+
+# Visualization 
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_PCA.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+
+```{r Single UMAP colored SampleDescription}
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md,
+      aes(x = UMAP_1, y = UMAP_2, fill = Sample_Description), 
+      alpha = 0.6, size = 1.3, 
+      shape = 21, , color = "gray10", stroke = 0.1
+    ),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+    dpi = 300, scale = 1) +
+  theme_classic() +
+  guides(
+    alpha = "none",
+    size = "none"
+  )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Sample_Description.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8,
+)
+
+```
+
+
+```{r Quick gene expression visualization}
+
+# Feaature plots
+plotUMAP(object = sce_comb,colour_by = "KRT5")
+plotUMAP(object = sce_comb,colour_by = "KRT19")
+plotUMAP(object = sce_comb,colour_by = "KLK3")
+plotUMAP(object = sce_comb,colour_by = "PIGR")
+plotUMAP(object = sce_comb,colour_by = "OLFM4")
+
+# Violin plot
+plotExpression(
+  sce_comb, 
+  features = c("KRT5", "KRT19", "PIGR","LTF","AMACR","KLK3"),
+  x = "Sample_Description", # Split by SampleDescription
+  colour_by = "Sample_Description",  # Color points by SampleDescription
+  show_smooth = TRUE) + 
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)
+  )
+
+```
+
+
+```{r Quick gene expression visualization}
+
+# Feaature plots
+plotUMAP(object = sce,colour_by = "AMACR")
+plotUMAP(object = sce,colour_by = "KRT5")
+plotUMAP(object = sce,colour_by = "PIGR")
+
+# Violin plot
+plotExpression(
+  sce, 
+  features = c("KRT5", "KRT19", "PIGR","LTF","AMACR","KLK3"),
+  show_smooth = TRUE) + 
+  scale_color_manual(values = pal.ggplot) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)
+  )
+
+```
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce object
+saveRDS(
+  object = sce,
+  file = paste0(out_path,time_stamp(),"sce_dim_reduced.rds"))
+
+```

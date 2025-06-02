@@ -1,0 +1,441 @@
+---
+title: "5.Dolgos patient matching tissue & PDOs: signature scores"
+author: "Romuald Parmentier"
+date: "2024-10-30"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(AnnotationHub)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  exp = "5_signature_score"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "4_malignancy_annotation", 
+  pattern = "sce_comb_malignancy_annotated.rds") 
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Perform signature score
+
+```{r HALLMARK prostate cancer signatures}
+
+# Define the list of panels
+panels = c("C2" = "LIU_PROSTATE_CANCER_UP",
+           "C2" = "LIU_PROSTATE_CANCER_DN",
+           "C2" = "TOMLINS_PROSTATE_CANCER_UP", 
+           "C2" = "TOMLINS_PROSTATE_CANCER_DN",
+           "C2" = "WALLACE_PROSTATE_CANCER_UP", 
+           "C2" = "WALLACE_PROSTATE_CANCER_DN",
+           "H" = "HALLMARK_ANDROGEN_RESPONSE",
+           "C5" = "GOBP_KERATINOCYTE_DIFFERENTIATION")
+
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  # Make a table with all genes belonging to the signature of interest
+  gene_panel = get_signature_data(
+    pathway_proxy = panel_name, MSigDB_category = names(panel_name)
+  )
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  min_max_outliers = get_signature_score_outliers( 
+    sce_object = sce_comb,
+    sce_signature_column = paste0(panel_name, "_score"),
+    signature_name = panel_name,
+    nb_outliers = 1
+  )
+  
+}
+
+```
+
+```{r Hirz_2023 prostate cancer signatures}
+
+# Define the list of panels
+Hirz_panels = list(
+  "Hirz_Epithelial_Club" =  tibble(
+    NAME = "Hirz_Epithelial_Club",
+    SYMBOL = c("SCGB3A1", "WFDC2", "LCN2", "MMP7", "KRT4", "TACSTD2", "SCGB3A1"),
+  ),
+  "Hirz_Epithelial_Hillock" = tibble(
+    NAME = "Hirz_Epithelial_Hillock",
+    SYMBOL = c("KRT13", "S100A16", "S100A14", "KRT19")
+  ),
+  "Hirz_Epithelial_Basal" = tibble(
+    NAME = "Hirz_Epithelial_Basal",
+    SYMBOL = c("TP63", "KRT14", "KRT5")
+  ),
+  "Hirz_Epithelial_Luminal" = tibble(
+    NAME = "Hirz_Epithelial_Luminal",
+    SYMBOL = c("KLK4", "KLK3", "KLK2", "ACP3", "AR")
+  ),
+  "Hirz_Epithelial_Tumor" = tibble(
+    NAME = "Hirz_Epithelial_Tumor",
+    SYMBOL = c("AMACR", "CACNA1D", "PCA3", "ERG", "FABP5", "COL9A2", "GCNT1", "PHGR1")
+  )
+)
+
+## Load the annotation resource
+EnsDb.Hsapiens.v104 <- AnnotationHub()[["AH95744"]]
+
+Hirz_panels <- lapply(Hirz_panels, function(panel_df) {
+  # Map ENSEMBL ID for each SYMBOL in the panel
+  panel_df$ENTREZID <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = panel_df$SYMBOL,  # Using SYMBOL column in each tibble
+    keytype = "SYMBOL",
+    column = "ENTREZID",
+    multiVals = "first"  # To handle multiple mappings if necessary
+  )
+  return(panel_df)
+})
+
+
+# Iterate over each panel in the list
+for (panel in Hirz_panels) {
+  
+  panel_name = unique(panel$NAME)
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  min_max_outliers = get_signature_score_outliers( 
+    sce_object = sce_comb,
+    sce_signature_column = paste0(panel_name, "_score"),
+    signature_name = panel_name,
+    nb_outliers = 1
+  )
+  
+}
+
+```
+
+# Visualizing signature scores
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+# Filter types where few cells only
+md <- md %>%
+  filter(!is.na(broad_type)) %>%  # Remove rows with NA in broad_type
+  group_by(broad_type) %>%        # Group by broad_type
+  filter(n() >= 10) %>%           # Keep groups with 10 or more cells
+  ungroup() 
+
+md <- md %>%
+  filter(!is.na(Malignancy_Type))
+
+md$Malignancy_Type <- factor(
+  md$Malignancy_Type, 
+  levels = c("Tumor", "Transitioning", "Club", "Basal/Hillock", 
+             "Immune cells", "Fibroblasts", "Endothelial cells", 
+             "Keratinocytes", "Other"))
+
+```
+
+```{r Violin plot of HALLMARK signatures = Fig3.F / Supp.Fig4A / Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+HALLMARK_panels = c( "LIU_PROSTATE_CANCER_UP_score",
+                     "LIU_PROSTATE_CANCER_DN_score",
+                     "TOMLINS_PROSTATE_CANCER_UP_score", 
+                     "TOMLINS_PROSTATE_CANCER_DN_score",
+                     "WALLACE_PROSTATE_CANCER_UP_score", 
+                     "WALLACE_PROSTATE_CANCER_DN_score",
+                     "HALLMARK_ANDROGEN_RESPONSE_score",
+                     "GOBP_KERATINOCYTE_DIFFERENTIATION_score")
+
+
+# Iterate over each panel in the list
+for (panel_name in HALLMARK_panels) {
+  
+  plot <- ggplot(md, aes(x = Malignancy_Type, y = .data[[panel_name]], fill = Malignancy_Type)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_malignancy_type, name = "Malignancy_Type") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+```{r Single UMAP colored with HALLMARK signature score = Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+HALLMARK_panels = c( "LIU_PROSTATE_CANCER_UP_score",
+                     "HALLMARK_ANDROGEN_RESPONSE_score",
+                     "GOBP_KERATINOCYTE_DIFFERENTIATION_score")
+
+# Iterate over each panel in the list
+for (panel_name in HALLMARK_panels) {
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md,
+        aes(x = UMAP_1, y = UMAP_2, fill = .data[[panel_name]]), 
+        alpha = 0.7, size = 1.3, 
+        shape = 21,
+        color = "gray10",
+        stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+      dpi = 300, scale = 1) +
+    # Create a continuous gradient for the fill color
+    scale_fill_gradientn(colors = c("lightgrey", "lightgrey", "#FF7078FF", "#69000CFF"),  # Grey to red gradient
+                         values = scales::rescale(c(-0.15,0.20, 0.35, 1))) +
+    theme_classic() + # Set limits
+    labs(title = panel_name,
+         fill = "Score") +  # Change the legend title
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plot_UMAP_", panel_name, ".pdf"),
+    device = "pdf",
+    width = 10,
+    height = 8,
+  )
+  
+}
+
+```
+
+```{r Violin plot of Hirz_2023 signatures}
+
+# Iterate over each panel in the list
+for (panel_name in names(Hirz_panels)) {
+  
+  panel_name = paste0(panel_name,"_score")
+  
+  plot <- ggplot(md, aes(x = Malignancy_Type, y = .data[[panel_name]], fill = Malignancy_Type)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_malignancy_type, name = "Malignancy_Type") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+```{r Violin plot of Hirz_2023 signatures facetted by sample}
+
+md$Malignancy_Type = factor(
+  x = md$Malignancy_Type, 
+  levels = c("Tumor", "Transitioning", "Club", "Basal/Hillock", "Keratinocytes","Immune cells", "Fibroblasts", "Endothelial cells", "Other")
+)
+
+# Split between the two patient
+md$patient_id = ifelse(
+  test =  grepl(x = md$Sample_Description, pattern = "P24-06"),
+  yes = "P24-06",
+  no = "P24-14")
+
+
+for(patient in unique(md$patient_id)){
+  
+  md_patient = md %>% filter(patient_id == patient)
+  
+  plot_list = list()
+  panel_id = 1
+  
+  for (panel_name in names(Hirz_panels)) {
+    
+    # Add score at the end f the opanel name to match metadata col in sce object
+    panel_name = paste0(panel_name,"_score")
+    
+    for(sample in unique(md_patient$Sample_Description)){ 
+      
+      md_sample = md_patient %>% filter(Sample_Description == sample)
+      
+      plot <- ggplot(md_sample, aes(x = Malignancy_Type, y = .data[[panel_name]], fill = Malignancy_Type)) +
+        geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width", drop = F) +
+        geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+        scale_fill_manual(values = pal_malignancy_type, name = "Malignancy_Type") +
+        guides(fill = "none") +
+        scale_x_discrete(drop = FALSE) + # to prevent ggplot2 from dropping unused levels.
+        theme_minimal() + 
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          axis.title = element_text(size = 12),  # Customize axis title appearance
+          axis.text = element_text(size = 10),    # Customize axis text appearance
+          axis.line = element_line(linewidth = 0.5),   # Customize axis line appearance
+          axis.ticks = element_line(size = 0.5)) +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        labs(
+          title = element_text(paste0(sample,": ", panel_name)),
+          x = element_blank(),
+          y = "Signature score") 
+      
+      plot_list[[panel_id]] = plot
+      
+      panel_id = panel_id + 1
+      
+    }
+    
+    if (patient == "P24-06") {number_rows = 3}else {number_rows = 2}
+    
+    multiple_page_layout <- gridExtra::marrangeGrob(
+      grobs = plot_list, 
+      nrow = number_rows, ncol = 1)
+    
+    ggsave(
+      plot = multiple_page_layout,
+      filename = paste0(out_path,time_stamp(),"plots_",patient,"_Violin_Plots_Facetted_Sample.pdf"),
+      device = "pdf",
+      width = 210,
+      height = 297,
+      unit = "mm")
+    
+  }
+  
+}
+
+```
+
+# Export files
+
+```{r Export sce object with signature scores }
+
+# Clustering takes a lot of time, better to export sce object here
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_signature_score.rds")
+)
+
+```
+
+

@@ -1,0 +1,202 @@
+---
+title: '1.Dolgos early passage PDO :  Normalization and rescaling'
+author: "Romuald Parmentier"
+date: "2024-10-08"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(scran)
+library(stringr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  exp = "1_normalization_rescaling"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce object after quality control
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_All-Dolgos_Tissue_All",
+  prev_exp = "1_quality_controls", 
+  pattern = "list_sce_qc.rds")
+
+list_sce = readRDS(file = file_path) 
+
+# Load metadata files
+metadata = read.csv("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/data/Dolgos_2024/Dolgos_2024_scRNAseq_metadata.csv")
+
+```
+
+```{r Kepp only early passage PDOs}
+
+# Identify early_passage_PDOs
+early_passage_PDOs = metadata$Sample_Description[which(metadata$Organoid_Type == "early_passage")]
+
+# Select them in the list
+list_sce = list_sce[which(names(list_sce) %in% early_passage_PDOs)]
+
+```
+
+```{r Remove low quality cells identified in QC controls}
+
+list_sce = lapply(list_sce, function(sce){
+  
+  cells_to_keep = which(sce$qc_discarded == F)
+  sce = sce[,cells_to_keep]
+  return(sce)
+  
+})
+
+```
+
+# Normalization 
+
+```{r quickCluster and logNormCounts}
+
+# Initialize ID
+sce_id = 1
+
+for (sce in list_sce) {
+  
+  set.seed(100)
+  
+  # Minimum number of cells in a cluster
+  # If less than 100 cells in a sce object, set the minimum nb of cell in a cluster to 20
+  if(ncol(sce) < 100){min.size = 20}else(min.size = 200)
+  
+  # Pre-clustering step
+  print(paste("Pre-clustering for", names(list_sce)[sce_id], "ongoing..."))
+  clust.sce = quickCluster(sce, min.size = min.size)
+  
+  # Replace the sizeFactor col in metadata, sizeFactors are here computed "cluster-wise"
+  print(paste("Calculating size factors for", names(list_sce)[sce_id], "ongoing..."))
+  new_sce <- computeSumFactors(sce, clusters = clust.sce)
+  
+  ## Normalize (using already calculated size factors)
+  print(paste("Log normalization for", names(list_sce)[sce_id], "ongoing..."))
+  new_sce <- logNormCounts(new_sce, size.factors = new_sce$sizeFactor) 
+  
+  print(paste("Adding", names(list_sce)[sce_id], "to the list_sce object"))
+  
+  # Update the list_sce
+  list_sce[[sce_id]] = new_sce
+  
+  # Append sce_id
+  sce_id = sce_id + 1
+  
+}
+
+```
+
+# Batch rescaling 
+
+```{r Rescaling list of sce}
+
+list_sce_rescaled <- batchelor::multiBatchNorm(
+  min.mean = 0.1, 
+  unlist(list_sce)
+)
+
+```
+
+```{r Visualise multi-batch scaling effect}
+
+# Store size factors before multi-batch scaling (intra simple normalization only), 
+# and size factors after multi-batch scaling (inter sample normalization only)
+
+scale_factors_df = tibble()
+
+for(sce_id in 1:length(list_sce)){
+  
+  scale_factors_df_sample = tibble(
+  cell_ID = colnames(list_sce[[sce_id]]),
+  sample = unique(list_sce[[sce_id]]$Sample_Description),
+  factors_before_scaling = list_sce[[sce_id]]$sizeFactor,
+  factors_after_scaling = list_sce_rescaled[[sce_id]]$sizeFactor)
+  
+  scale_factors_df = bind_rows(scale_factors_df, scale_factors_df_sample)
+  
+}
+
+# Pivot table to longer format for ggplot 
+scale_factors_df_long = tidyr::pivot_longer(
+  data = scale_factors_df,
+  cols = c("factors_before_scaling","factors_after_scaling"),
+  names_to = "factors_origin" ) 
+
+# Re-organize order of appearance 
+scale_factors_df_long$factors_origin = factor(scale_factors_df_long$factors_origin,levels = c("factors_before_scaling","factors_after_scaling"))
+
+# Plot scale.factor before and after multi-batch scaling
+plot = ggplot(scale_factors_df_long, aes(x = value)) +
+  geom_density(aes(fill = sample), alpha = 0.5) +
+  xlim(c(0,10)) +
+  facet_wrap(~factors_origin)
+
+plot
+
+```
+
+```{r Create a combined rescaled sce object}
+
+# Get total raw counts, first in a list, then combine them into a matrix
+counts_comb = lapply(list_sce_rescaled, function(x) {counts(x)})
+counts_comb <- Reduce(function(x, y) cbind(x, y), counts_comb)
+
+## Then get total logNormed counts, first in a list, then combine them into a matrix
+logcounts_comb = lapply(list_sce_rescaled, function(x) {logcounts(x)})
+logcounts_comb <- Reduce(function(x, y) cbind(x, y), logcounts_comb)
+
+# Combine all cell metadata (columns are already the same for each object of the list)
+colData_comb = lapply(list_sce_rescaled, function(x) {colData(x)})
+colData_comb = Reduce(function(x, y) rbind(x, y), colData_comb)
+
+# Combine the slots to create the combined sce object
+sce_comb_rescaled <- SingleCellExperiment( 
+  assays = list(counts = counts_comb, logcounts = logcounts_comb),  
+  rowData = rowData(list_sce_rescaled[[1]]), # RowData is similar among all elements 
+  colData = colData_comb)
+
+```
+
+# Export files 
+
+- Rescaled object are intended for further analysis comprising this batch only.
+- Non-rescaled object will be used when integrated with other datasets, where re-scaling will be applied among all datasets.
+
+```{r Export RDS files}
+
+# Export list_sce 
+saveRDS(
+  object = list_sce_rescaled,
+  file = paste0(out_path,time_stamp(), "list_sce_normalized.rds"))
+
+# Export re-scaled list_sce 
+saveRDS(
+  object = list_sce_rescaled,
+  file = paste0(out_path,time_stamp(), "list_sce_normalized_rescaled.rds"))
+
+# Export sce_comb object
+saveRDS(
+  object = sce_comb_rescaled,
+  file = paste0(out_path,time_stamp(),"sce_comb_normalized_rescaled.rds"))
+
+```
+

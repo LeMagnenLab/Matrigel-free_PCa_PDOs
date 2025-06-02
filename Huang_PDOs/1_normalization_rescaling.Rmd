@@ -1,0 +1,278 @@
+---
+title: "1.Huang_2023 (PDOs): re-normalize and rescale dataset"
+author: "Romuald Parmentier"
+date: "2024-03-20"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(scran)
+library(stringr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Huang_PDOs",
+  exp = "1_normalization_rescaling"
+)
+
+```
+
+# Prepare the data
+
+```{r Load files}
+
+# Load seurat object (already QC filtered, normalized and annotated for cell type)
+seurat_comb <- list.files(
+  path = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/data/Huang_2023/",
+  pattern = ".rds",
+  full.names = T)
+
+seurat_comb = readRDS(seurat_comb)
+
+# Load 10x cell barcode whitelist (because cell names are not Loupe-Browser friendly)
+cell_barcodes_whitelist <- list.files(
+  path = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/data",
+  pattern = "whitelist_barcodes_complete.csv",
+  full.names = T)
+
+cell_barcodes_whitelist = read.csv(file = cell_barcodes_whitelist, header = F)
+
+```
+
+```{r Clean object}
+
+# Transform seurat to SCE object
+sce_comb <- SingleCellExperiment( 
+  assays = list(counts = seurat_comb@assays$RNA$counts, logcounts = seurat_comb@assays$RNA$counts),  
+  rowData = data.frame("SYMBOL" = rownames(seurat_comb)), 
+  colData = seurat_comb@meta.data,
+  reducedDims = list("UMAP_original" = Seurat::Embeddings(seurat_comb[["umap"]]))
+)
+
+# Select metadata columns to keep
+colData(sce_comb) = colData(sce_comb)[c("orig.ident","condition","AR_status")]
+colnames(colData(sce_comb)) = c("Sample_ID","Treatment","AR_status")
+
+# Simplify sample_ID, keeping only the patient ID
+sce_comb$Sample_ID = ifelse(
+  test = str_detect(sce_comb$Sample_ID, pattern = "HNW_PR5316"),
+  yes = "HNW_PR5316",
+  no = "HNW_PR5269")
+
+# Reorder sce_comb according samle_ID
+ordered_sample_ID = order(sce_comb$Sample_ID)
+sce_comb = sce_comb[,ordered_sample_ID]
+
+# Add metadata column with unique ID
+sce_comb$Sample_Description = paste0(sce_comb$Sample_ID,"_", sce_comb$Treatment)
+
+# Renames cells according loupe-browser friendly format
+colnames(sce_comb) = paste0(
+  cell_barcodes_whitelist[1:ncol(sce_comb),],
+  "-",
+  sce_comb$Sample_ID[1:ncol(sce_comb)],
+  "_Huang_2023"
+  )
+
+```
+
+```{r Split sce by patient}
+
+list_sce = list(
+  sce_comb[,which(sce_comb$Sample_ID == "HNW_PR5269")],
+  sce_comb[,which(sce_comb$Sample_ID == "HNW_PR5316")]
+  )
+
+names(list_sce) = unique(sce_comb$Sample_ID)
+
+```
+
+```{r Convert ENSEMBL <--> SYMBOL and add other gene informations}
+
+## Load the annotation resource
+EnsDb.Hsapiens.v104 <- AnnotationHub()[["AH95744"]]
+
+sce_id = 1
+
+for(sce in list_sce){
+  
+  name = names(list_sce)[[sce_id]]
+  
+  # Extract rowData slot of the first object (same evrywhere)
+  rowData_df = as_tibble(rowData(sce))
+  
+  # Map ENSEMBL ID to SYMBOL
+  SYMBOL_to_ENS <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = rowData_df$SYMBOL, # List against which we want a match
+    keytype = "SYMBOL",# Type of the key (predefined list, see help)
+    column = "GENEID")
+  
+  # Add symbol column to rowData_df
+  rowData_df$ENSEMBL = SYMBOL_to_ENS
+  
+  # Fiulter out NA in ENSEMBL otherwise mapping is not possible
+  rowData_df = rowData_df%>%
+    dplyr::filter(!is.na(ENSEMBL))
+  
+  # Map feature type to rowData_df
+  ENS_to_SYMBOL <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = rowData_df$ENSEMBL, # List against which we want a match
+    keytype = "GENEID",# Type of the key (predefined list, see help)
+    column = "GENEBIOTYPE") # The matching request
+  
+  # Add type of feature column to rowData_df
+  rowData_df$GENEBIOTYPE = ENS_to_SYMBOL
+  
+  # Map chromosome to rowData_df
+  ENS_to_chr <- mapIds(
+    EnsDb.Hsapiens.v104, 
+    keys = rowData_df$ENSEMBL, # List against which we want a match
+    keytype = "GENEID",# Type of the key (predefined list, see help)
+    column = "SEQNAME") # The matching request
+  
+  # Add chromosome to rowData_df
+  rowData_df$SEQNAME = ENS_to_chr
+  
+  new_rowData_df = rowData_df %>%
+    dplyr::filter(SEQNAME %in% c(1:22, "MT","X","Y")) %>%
+    dplyr::filter(GENEBIOTYPE %in% c("protein_coding","lncRNA")) %>%
+    dplyr::filter(SYMBOL != "") %>%
+    dplyr::select(ENSEMBL,SYMBOL,GENEBIOTYPE,SEQNAME)
+  
+  # Find common genes between the current SCE object's rownames and the ENSEMBL IDs in new_rowData
+  common_genes <- intersect(rownames(sce), new_rowData_df$SYMBOL)
+  
+  # Subset the counts matrix to include only the common genes found in both the SCE object and new_rowData
+  subset_counts <- counts(sce)[common_genes, ]
+  
+  # Ensure rownames of the subset_counts matrix are updated to the corresponding SYMBOL names from new_rowData
+  rownames(subset_counts) <- new_rowData_df$SYMBOL
+  
+  # Create a new SCE object with:
+  # - Subsetted counts matrix (updated gene names)
+  # - Updated rowData (with SYMBOLs)
+  # - Same colData as the original SCE object
+  sce <- SingleCellExperiment(
+    assays = list(counts = subset_counts),  # Updated counts matrix
+    rowData = DataFrame(new_rowData_df),   # Updated rowData with SYMBOLs
+    colData = colData(sce)  # Retain original colData unchanged
+  )
+  
+  list_sce[[name]] <- sce
+  
+  sce_id = sce_id + 1
+  
+}
+
+```
+
+
+# Normalization 
+
+No need to remove identified bad quality cells as they were already absent fromn the downloaded object
+
+```{r quickCluster and logNormCounts}
+
+# Initialize ID
+sce_id = 1
+
+for (sce in list_sce) {
+
+  set.seed(100)
+  
+  # Pre-clustering step
+  print(paste("Pre-clustering for", names(list_sce)[sce_id], "ongoing..."))
+  clust.sce = quickCluster(sce)
+  
+  # # Adds a sizeFactor col in metadata, sizeFactors are here computed "cluster-wise"
+  print(paste("Calculating size factors for", names(list_sce)[sce_id], "ongoing..."))
+  new_sce <- computeSumFactors(sce, clusters = clust.sce)
+  
+  ## Normalize (using already calculated size factors)
+  print(paste("Log normalization for", names(list_sce)[sce_id], "ongoing..."))
+  new_sce <- logNormCounts(new_sce, size.factors = new_sce$sizeFactor) 
+  
+  print(paste("Adding", names(list_sce)[sce_id], "to the list_sce object"))
+  
+  # Update the list_sce
+  list_sce[[sce_id]] = new_sce
+  
+  # Append sce_id
+  sce_id = sce_id + 1
+
+}
+
+```
+
+# Batch rescaling 
+
+```{r Rescaling list of sce}
+
+list_sce_rescaled <- batchelor::multiBatchNorm(
+  min.mean = 0.1, 
+  unlist(list_sce)
+)
+
+```
+
+
+```{r Create a combined rescaled sce object}
+
+# Get total raw counts, first in a list, then combine them into a matrix
+counts_comb = lapply(list_sce_rescaled, function(x) {counts(x)})
+counts_comb <- Reduce(function(x, y) cbind(x, y), counts_comb)
+
+## Then get total logNormed counts, first in a list, then combine them into a matrix
+logcounts_comb = lapply(list_sce_rescaled, function(x) {logcounts(x)})
+logcounts_comb <- Reduce(function(x, y) cbind(x, y), logcounts_comb)
+
+# Combine all cell metadata (columns are already the same for each object of the list)
+colData_comb = lapply(list_sce_rescaled, function(x) {colData(x)})
+colData_comb = Reduce(function(x, y) rbind(x, y), colData_comb)
+
+# Combine the slots to create the combined sce object
+sce_comb_rescaled <- SingleCellExperiment( 
+  assays = list(counts = counts_comb, logcounts = logcounts_comb),  
+  rowData = rowData(list_sce_rescaled[[1]]), # RowData is similar among all elements 
+  colData = colData_comb,
+  reducedDims = list("UMAP_original" = reducedDim(sce_comb))
+) 
+
+```
+
+
+# Export files 
+
+- Rescaled object are intended for further analysis comprising this batch only.
+- Non-rescaled object will be used when integrated with other datasets, where re-scaling will be applied among all datasets.
+
+```{r Export RDS files}
+
+# Export list_sce 
+saveRDS(
+  object = list_sce_rescaled,
+  file = paste0(out_path,time_stamp(), "list_sce_normalized.rds"))
+
+# Export re-scaled list_sce 
+saveRDS(
+  object = list_sce_rescaled,
+  file = paste0(out_path,time_stamp(), "list_sce_normalized_rescaled.rds"))
+
+# Export sce_comb object
+saveRDS(
+  object = sce_comb_rescaled,
+  file = paste0(out_path,time_stamp(),"sce_comb_normalized_rescaled.rds"))
+
+```
+

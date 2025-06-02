@@ -1,0 +1,917 @@
+---
+title: '4. Atlas PCa PDOS + tissue (tumor only) from Song, Hirz, Chen dataset: differential expression (all cells)'
+author: "Romuald Parmentier"
+date: "2025-01-02"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(muscat)
+library(dplyr)
+library(ggplot2)
+library(clusterProfiler)
+library(fgsea)
+library(org.Hs.eg.db)
+library(enrichplot)
+
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  exp = "4_differential_expression_all_cells"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO-Song_Tissue-Hirz_Tissue-Chen_Tissue",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced")
+
+sce_comb = readRDS(file_path)
+
+```
+
+Data can be aggregated by Data_Type (Org vs Tissue) or Cutlure condition (ECMf_Org, Matrigel_Org, Tissue)
+
+```{r Make muscat sce and ggregate data (Data_Type or Culture_Condition)}
+
+# Createa a temporary column so sa
+sce_comb$Cluster_ID = "All_Cells"
+
+# Define configurations for SCE preparation
+# One sce for Data_Type pseudobulked data and another for Culture_Condition pseudobulked data
+sce_config <- list(
+  Culture_Condition = list(kid = "Cluster_ID", gid = "Culture_Condition", sid = "Sample_Name"),
+  Data_Type = list(kid = "Cluster_ID", gid = "Data_Type", sid = "Sample_Name")
+)
+
+# Placeholder for SCE and pseudobulk objects
+sce_muscat_list <- list()
+pb_data_list <- list()
+
+# Loop through configurations to prepare SCE and pseudobulking
+for (name in names(sce_config)) {
+  
+  config <- sce_config[[name]]
+  
+  # Prepare SCE object
+  sce_muscat_list[[name]] <- prepSCE(
+    x = sce_comb,
+    kid = config$kid,
+    gid = config$gid,
+    sid = config$sid
+  )
+  
+  # Perform pseudobulking
+  pb_data_list[[name]] <- aggregateData(
+    sce_muscat_list[[name]],
+    assay = "counts",
+    fun = "sum",
+    by = c("cluster_id", "sample_id")
+  )
+  
+}
+
+```
+
+# Plot MDS for Culture_Condition pseudobulked data
+
+```{r Compute and extract MDS coordinates}
+
+# Extract count matrix from your SCE object
+counts <- assay(pb_data_list$Culture_Condition, "All_Cells")
+
+# Step 1: Create a DGEList object
+dge <- DGEList(counts)
+
+# Step 2: Normalize the data
+dge <- calcNormFactors(dge)
+
+# Step 3: Compute MDS
+mds <- plotMDS.DGEList(dge, plot = FALSE)  # Get MDS coordinates without plotting
+
+# Extract the MDS coordinates
+mds_coords <- data.frame(
+  MDS1 = mds$x,
+  MDS2 = mds$y,
+  sample_id = colnames(counts)  # Add sample IDs for reference
+)
+
+mds_coords$Culture_Condition = pb_data_list$Culture_Condition$group_id
+mds_coords$Dataset = pb_data_list$Culture_Condition$Dataset
+mds_coords$Data_Type_Details = pb_data_list$Culture_Condition$Data_Type_Details
+
+```
+
+```{r Plot MDS}
+
+plot_list <- list()
+sample_id <- 1
+
+for (query in c("Culture_Condition","Data_Type_Details")) {
+  
+  # Define color palette based on the current query_column
+  color_palette <- switch(
+    query,
+    "Culture_Condition" = pal_culture_condition,
+    "Data_Type_Details" = pal_data_type_details,
+    stop("Invalid query_column")
+  )
+  
+  # Create plot
+  plot <- ggplot() +
+    ggrastr::rasterise(
+      geom_point(
+        data = mds_coords,
+        aes(x = MDS1, y = MDS2, color = .data[[query]], shape = Dataset), 
+        alpha = 0.8, size = 3,
+      ), dpi = 200, scale = 1
+    ) +
+    # Apply color palette
+    scale_color_manual(values = color_palette) +
+    ggtitle(query) +
+    theme_classic() +
+    guides(alpha = "none", size = "none")
+  
+  # Store plot
+  plot_list[[sample_id]] <- plot
+  sample_id <- sample_id + 1
+  
+}
+
+# Arrange all plots into a multi-page PDF
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1
+)
+
+# Save as PDF
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plot_MDS_Pseudobulked_Culture_Condition.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm"
+)
+
+```
+
+
+# Perform DEA (called differential state analysis with muscat)
+
+## Run DEA
+
+Run for ECMf vs Tissue / MAtrigel vs Tissue (= Culture condition) AND for PDOs vs Tissue (Data_Type)
+
+```{r Perform Differential State analysis with muscat}
+
+# Define contrasts for each experiment (Data_Type and Culture_Condition)
+contrast_list <- list(
+  Culture_Condition = c("ECMf-Tissue", "Matrigel-Tissue"),
+  Data_Type = c("PDOs-Tissue")
+)
+
+# Placeholder to store results
+pbDS_results_list <- list()
+
+# Loop over each SCE object
+for (name in names(pb_data_list)) {
+  
+  # Extract the current SCE object and experiment info
+  sce <- pb_data_list[[name]]
+  ei <- metadata(sce)$experiment_info
+  
+  # Create model matrix
+  mm <- model.matrix(~ ei$group_id + 0)
+  dimnames(mm) <- list(ei$sample_id, levels(ei$group_id))
+  
+  # Create contrasts
+  contrasts <- makeContrasts(contrasts = contrast_list[[name]], levels = mm)
+  
+  # Run DS analysis
+  res <- pbDS(sce, design = mm, contrast = contrasts)
+  
+  # Combine results (specific to the contrast)
+  combined_results <- do.call(rbind, lapply(names(res$table), function(contrast_name) {
+    res$table[[contrast_name]]$All_Cells
+  }))
+  
+  # Store results in a named list
+  pbDS_results_list[[name]] <- combined_results
+  
+}
+
+# Export th e list of pbDAta with Data_Type and Culture_Condition pb data
+saveRDS(
+  object = pbDS_results_list,
+  file = paste0(out_path,time_stamp(),"object_pbDEA_results_list.rds"))
+
+```
+
+## Filtering, visualizing and exporting DEA results
+
+### Culture_Condition
+
+```{r Calculate positive fraction of cell for each gene per cutlure condition}
+
+# Extract the assay matrix and cell metadata
+counts_mat <- assay(sce_comb, "counts")  
+cell_metadata <- colData(sce_comb)
+
+# Initialize a results list
+result_list <- list()
+
+# Loop through each unique Culture_Condition (ECMf, Matrigel, Tissue)
+
+for (condition in unique(cell_metadata$Culture_Condition)) {
+  
+  # Subset the cells for the current Culture_Condition
+  condition_cells <- cell_metadata$Culture_Condition == condition
+  subset_counts <- counts_mat[, condition_cells]
+  
+  # Calculate non-zero frequency for each gene
+  freq_positive_cells <- rowSums(subset_counts > 0) / sum(condition_cells)
+  
+  # Store results in a data.frame
+  result_list[[condition]] <- data.frame(
+    Culture_Condition = condition,
+    gene = rownames(counts_mat),
+    freq_positive_cells = freq_positive_cells
+  )
+}
+
+# Combine results into a single data.frame
+positive_cells_freq_df <- do.call(rbind, result_list)
+
+```
+
+```{r Add frequency of positive cells per cutlure condition to pbDS_results_Culture_Condition}
+
+pbDS_results_Culture_Condition = pbDS_results_list$Culture_Condition
+
+# Add a ECMf-Org positive cells freq columm
+pbDS_results_Culture_Condition = pbDS_results_Culture_Condition %>%
+  left_join(
+    y = positive_cells_freq_df %>% filter(Culture_Condition == "ECMf") %>% dplyr::select(gene, freq_positive_cells), 
+    by = "gene") %>%
+  rename(freq_positive_cells_ECMf = "freq_positive_cells")
+
+# Add a Matrigel-Org positive cells freq columm
+pbDS_results_Culture_Condition = pbDS_results_Culture_Condition %>%
+  left_join(
+    y = positive_cells_freq_df %>% filter(Culture_Condition == "Matrigel") %>% dplyr::select(gene, freq_positive_cells), 
+    by = "gene") %>%
+  rename(freq_positive_cells_Matrigel = "freq_positive_cells")
+
+# Make a column with Org positive cell frequency and delete the two previous one (ECMf freq and Matrigel Freq)
+pbDS_results_Culture_Condition = pbDS_results_Culture_Condition %>%
+  mutate(Freq_pos_cells_Org = case_when(
+    contrast == "ECMf-Tissue" ~ freq_positive_cells_ECMf,
+    TRUE ~ freq_positive_cells_Matrigel
+  )) %>%
+  dplyr::select(-c("freq_positive_cells_Matrigel","freq_positive_cells_ECMf"))
+
+# Adding a column for frq of positive cells in tissue 
+pbDS_results_Culture_Condition = pbDS_results_Culture_Condition %>%
+  left_join(
+    y = positive_cells_freq_df %>% filter(Culture_Condition == "Tissue") %>% dplyr::select(gene, freq_positive_cells), 
+    by = "gene") %>%
+  rename(Freq_pos_cells_tissue = "freq_positive_cells")
+
+write.csv(
+  x = pbDS_results_Culture_Condition,
+  file = paste0(out_path,time_stamp(),"table_pbDEA_results_Culture_Condition_raw.csv"))
+
+```
+
+```{r Filtering genes DE in the same direciton for both ECMf and Matrigel Org }
+
+# Combine and filter rows based on consistent logFC direction and presence in both contrasts
+pbDS_results_Culture_Condition <- pbDS_results_Culture_Condition %>%
+  group_by(gene) %>%  
+  filter(
+    all(logFC > 0) | all(logFC < 0),  # DE has to be in the same direction for both ECMf and Matrigel
+    # p_adj.loc < 0.05  # No filtering, will be accounted with score calculated in next step
+    # abs(logFC) > 1 # No filtering, will be accounted with score calculated in next step
+  ) 
+
+```
+
+```{r Filtering raw results : pct positive cells}
+
+pbDS_results_Culture_Condition_filtered = pbDS_results_Culture_Condition %>%
+  group_by(gene) %>%
+  filter(Freq_pos_cells_Org > 0.6 | Freq_pos_cells_tissue > 0.6) %>%
+  filter(n() == 2) # Allows to keep only genes present in 60% of cells for both ECMf and Matrigel
+
+write.csv(
+  x = pbDS_results_Culture_Condition_filtered,
+  file = paste0(out_path, time_stamp(),"table_pbDEA_results_Culture_Condition_60pct_pos_cells.csv")
+)
+
+```
+
+### Data_Type
+
+#### Visualize differentially expressed genes
+
+```{r Filtering DE genes between Data Type (PDOs/Tissue)}
+
+# Select genes DE between PDos and tissue
+DE_data = pbDS_results_list$Data_Type
+
+# Filter genes that are DE in the same direction in ECMf and Matrigel
+DE_data = DE_data %>%
+  filter(gene %in% unique(pbDS_results_Culture_Condition$gene))  
+
+```
+
+```{r Volcano plot all DE genes (only same DE direction)}
+
+# Transform data and define categories for coloring
+DE_data <- DE_data %>%
+  mutate(
+    neg_log10_padj = -log10(p_adj.loc), # Transform p_adj.loc
+    highlight = case_when(
+      logFC > 1 & p_adj.loc < 0.05 ~ "Upregulated in PDOs",   # logFC > 1
+      logFC < -1 & p_adj.loc < 0.05 ~ "Upregulated in Tissue", # logFC < -1
+      TRUE ~ "Not Significant"                         # Non-significant
+    )
+  )
+
+# Create the volcano plot
+plot = volcano_plot <- ggplot(data = DE_data, aes(x = logFC, y = neg_log10_padj)) +
+  geom_point(aes(color = highlight), alpha = 0.6, size = 2) +  # Points with color
+  scale_color_manual(
+    values = c(
+      "Upregulated in PDOs" = "#007395",     # Purple for logFC > 1
+      "Upregulated in Tissue" = "#B66DFF",   # Teal for logFC < -1
+      "Not Significant" = "gray"     # Gray for others
+    )
+  ) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black", alpha = 0.5) + # LogFC thresholds
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black", alpha = 0.5) + # P-value threshold
+  labs(
+    title = "Volcano Plot",
+    subtitle = "Only genes varying in the same direction for CMf and MAtrigel" ,
+    x = "Log Fold Change (logFC)",
+    y = "-log10(Adjusted p-value)",
+    color = "Category"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 12),
+    legend.position = "top"
+  )
+
+ggsave(
+  filename = paste0(out_path, time_stamp(),"plot_Volcano_pbDEA.pdf"),
+  plot = plot, 
+  width = 8,
+  height = 8,
+  device = "pdf")
+
+
+```
+
+# Perform Over-Representation analysis
+
+Only takes names of previously selected DE genes (pvalue amd log FC treshold defined by the user)
+
+```{r Over representation analysis and Dotplot}
+
+# Get DE genes names after 60pct positive cells filter
+DE_genes <- pbDS_results_Culture_Condition_filtered %>%
+  group_by(gene) %>%  
+  filter(
+    p_adj.loc < 0.05,  # No filtering, will be accounted with score calculated in next step
+    abs(logFC) > 1 # No filtering, will be accounted with score calculated in next step
+  ) %>%
+  filter(n() == 2) # Genes that are DE in the same direction for Matrigel and ECMf 
+
+
+# Perform ORA
+enrich_results <- enrichGO(
+  gene = unique(DE_genes$gene),
+  keyType = "SYMBOL",
+  ont = "BP", 
+  minGSSize = 10,
+  maxGSSize = 100,
+  pvalueCutoff = 0.05,
+  pAdjustMethod = "fdr",
+  OrgDb = "org.Hs.eg.db"
+)
+
+# Simplify GO Terms
+enrich_results_simplified  <- simplify(enrich_results, 
+                                       cutoff = 0.25, 
+                                       by = "p.adjust", 
+                                       select_fun = min)
+
+# Check Enriched terms
+df_enriched_terms = enrich_results_simplified@result
+
+# Dotplot of GO Terms
+plot = dotplot(enrich_results_simplified, showCategory = 10) +  # Show top 20 categories
+  ggtitle("Dot Plot of Enriched GO Terms")
+
+# Save plot 
+ggsave(
+  filename = paste0(out_path, time_stamp(),"plot_ORA_GOBP_DotPlot.pdf"),
+  plot = plot, 
+  width = 8,
+  height = 8,
+  device = "pdf")
+
+# Save ORA Object
+saveRDS(
+  object = df_enriched_terms,
+  file = paste0(out_path, time_stamp(),"object_ORA_GOBP_Culture_Condition.rds" )
+)
+
+
+```
+
+```{r EMA plot on ORA enriched terms}
+
+ora <- enrichplot::pairwise_termsim(enrich_results)
+
+plot <- emapplot(
+  ora, 
+  max.overlaps = 2,
+  showCategory = 15,
+  cex.params = list(category_label = 0.8)
+  )# Adjust fontsize here
+
+
+# Save plot 
+ggsave(
+  filename = paste0(out_path, time_stamp(),"plot_ORA_GOBP_EmaPlot.pdf"),
+  plot = plot, 
+  width = 8,
+  height = 8,
+  device = "pdf")
+
+
+```
+
+# Perform GSEA
+
+Takes a sorted list of all genes
+
+## Compute score to order genes
+
+```{r Compute score with pval anf logFC to sort list of genes}
+
+pbDS_results_Culture_Condition_filtered = pbDS_results_Culture_Condition_filtered %>%
+  mutate(score = -log10(p_adj.loc) * sign(logFC)) 
+
+Gene_FC_list = pbDS_results_Culture_Condition_filtered %>%
+  group_by(gene) %>%
+  summarise(mean_score = mean(score)) %>%
+  arrange(desc(mean_score))
+
+Gene_FC_sorted = as.vector(Gene_FC_list$mean_score)
+names(Gene_FC_sorted) = Gene_FC_list$gene
+
+```
+
+## GSEA with Gene Ontologies (Cluster Profiler)
+
+```{r Perform GSEA}
+
+# Load collections
+REACTOME <- read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_REACTOME.gmt")
+HALLMARK <- read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_HALLMARKS_hs_v2023_2.gmt")
+KEGG_CP <- read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_KEGG_Canonical_Pathways.gmt")
+GOBP <- read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Biological_Process.gmt")
+GOMF <- read.gmt("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/MSigDB_C5_GO_Molecular_Function.gmt")
+
+list_collection <- list(
+  "REACTOME" = REACTOME,
+  "HALLMARK" = HALLMARK,
+  "KEGG_CP" = KEGG_CP,
+  "GOBP" = GOBP,
+  "GOMF" = GOMF
+)
+
+
+names_collection = names(list_collection)
+
+collection_id = 1
+gse_df_list = list()
+gse_list = list()
+
+# Perform GSEA for each collection
+for(collection in list_collection){
+  
+  collection <- list_collection[[collection_id]]
+  collection_name <- names_collection[collection_id]
+  
+  print(paste0("Performing GSEA for collection: ", collection_name))
+  
+  gse <- GSEA(
+    geneList = Gene_FC_sorted,
+    TERM2GENE = collection,
+    pvalueCutoff = 0.05,
+    pAdjustMethod = "fdr",
+    minGSSize = 3,
+    maxGSSize = 60,
+    by = "fgsea",
+    verbose = FALSE
+  )
+  
+  if (nrow(gse@result) == 0) {
+    print(paste0("No enriched terms found for collection: ", collection_name))
+    collection_id = collection_id + 1
+    next
+  }
+  
+  print(paste0(nrow(gse@result), " enriched terms found in collection: ", collection_name))
+  
+  # Store results
+  gse_df <- gse@result
+  gse_df$Collection <- collection_name
+  gse_df_list <- append(gse_df_list, list(gse_df))
+  gse_list <- append(gse_list, list(gse))
+  
+  collection_id = collection_id + 1
+  
+}
+
+# Make a single dataframe out of gsea results
+names(gse_list) = lapply(gse_df_list,function(x){unique(x$Collection)})
+gse_results_df = data.table::rbindlist(gse_df_list)
+
+# Export gse object
+
+saveRDS(
+  object = gse_list,
+  file = paste0(out_path,time_stamp(),"object_GSE_list_per_collection_Cutlure_Condition.rds")
+)
+
+```
+
+```{r GSEA dotplot}
+
+# Create output path
+out_path <- create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "4_differential_expression_all_cells/GSEA_Plots"
+)
+
+collection_id = 1
+
+# Loop through gse_list and generate plots
+for (gse in gse_list) {
+  
+  collection_name <- names(gse_list)[collection_id]
+  
+  print(paste0("Generating plot for collection: ", collection_name))
+  
+  plot <- dotplot(gse, showCategory = 10, split = ".sign") + 
+    facet_grid(. ~ .sign) +
+    ggtitle(
+      label = paste0("Top 10 terms enriched from ", collection_name),
+      subtitle = "Only genes expressed by either 60% of PDOs or Tissue cells"
+    ) +
+    theme(axis.text.y = element_text(size = 8))
+  
+  # Save the plot
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path, "/", time_stamp(), "_plot_GSEA_", collection_name, "_Dotplot.pdf"),
+    device = "pdf",
+    width = 9,
+    height = 9
+  )
+  
+  collection_id = collection_id + 1
+}
+
+```
+
+```{r GSEA barplot (NES_Plots)}
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "4_differential_expression_all_cells/NES_Plots"
+)
+
+for(collection in unique(gse_results_df$Collection)){
+  
+  # Convert the results to a data frame
+  gsea_df <- gse_results_df %>%
+    filter(Collection == collection)
+  
+  # Extract pathways and their enrichment scores (ES)
+  enrichment_data <- gsea_df %>%
+    dplyr::select(Description, NES,p.adjust) %>% # Select pathway names and ES scores
+    arrange(desc(NES))
+  
+  # Create the barplot
+  plot = ggplot(enrichment_data, aes(x = NES, y = Description, fill = p.adjust)) +
+    geom_bar(stat = "identity") + 
+    scale_fill_gradient(low = "blue", high = "red") + 
+    labs(
+      title = "Top Enriched Pathways",
+      x = "Pathway",
+      y = "Enrichment Score (ES)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.y = element_text(size = 5),
+      plot.title = element_text(hjust = 0.5)
+    )
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path, time_stamp(),"plot_GSEA_", collection,"_NES_Barplot.pdf"),
+    device = "pdf",
+    width = 8,
+    height = 5
+  )
+  
+}
+
+
+
+```
+
+```{r GSEA Enrichment score plot (on single enriched Patways)}
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "4_differential_expression_all_cells/Enrichment_Plots"
+)
+
+for(pathway in unique(gse_results_df$ID)){
+  
+  # Load gse results for significant pathway
+  pathway_gse_df = gse_results_df %>% filter(ID == pathway)
+  
+  # Load collection name table
+  collection_name = unique(pathway_gse_df$Collection)
+  
+  # Load the gsea object generated by GSEA function previously
+  pathway_gse = gse_list[[collection_name]]
+  
+  # Plot enrichment plot for significant pathways
+  plot_enrich = enrichplot::gseaplot2(
+    x = pathway_gse,
+    geneSetID =  pathway,
+    pvalue_table = T,
+    title = paste0(
+      pathway," Organoids vs Tissue (= ref)", 
+      "\n",
+      "Only genes expressed by either 60% of PDOs or Tissue cells"
+    ))
+  
+  ggsave(
+    plot = plot_enrich,
+    filename = paste0(out_path, time_stamp(),"plot_GSEA_", pathway,"_Enrichment_plot.pdf"),
+    device = "pdf",
+    width = 11,
+    height = 9
+  )
+  
+}
+
+```
+
+# Plot gene expression for core enriched genes for enriched pathway
+
+```{r Plot gene expression of core enriched genes for GSEA enriched terms}
+
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "4_differential_expression_all_cells/Core_Enrichement_Gene_Expression_Plots"
+)
+
+## Loop among gse objects (one per collection)
+##############################################
+
+collection_id = 1
+
+for(gse in gse_list){
+  
+  # Load collection name table
+  collection_name = names(gse_list)[collection_id]
+  
+  print(paste0("Enrich plot for collection : ", collection_name))
+  
+  ## Loop among pathways of the collection 
+  ##########################################
+  
+  pathway_id = 1
+  
+  for(genes_of_interest in gse$core_enrichment){ 
+    
+    pathway_name = gse$Description[[pathway_id]]
+    
+    print(paste0("Enrich plot for pathway: ", pathway_name))
+    genes_of_interest <- unlist(strsplit(genes_of_interest, split = "/"))
+    
+    # Extract expression data for gene of interst and shape the df
+    
+    expression_data = sce_comb[genes_of_interest,]
+    metadata = as.data.frame(colData(expression_data))
+    
+    expression_data = as.data.frame(t(as.matrix(assay(expression_data, "logcounts"))))  # Replace "logcounts" with the desired assay
+    
+    # Add metadata
+    expression_data <- cbind(metadata, expression_data)
+    
+    # Reshape the data to long format
+    expression_data_long <- expression_data %>%
+      tidyr::pivot_longer(cols = all_of(genes_of_interest), names_to = "Gene", values_to = "Expression")
+    
+    plot_list = list()
+    gene_id = 1
+    
+    ## Loop among gene of the gene list objects (one per collection)
+    ################################################################
+    
+    for(gene in genes_of_interest){
+      
+      # Order samples according nedian expresion of gene within Data_Type condition 
+      expression_data_long_gene = expression_data_long %>% filter(Gene == gene)
+      
+      expression_data_long_gene_sorted <- expression_data_long_gene %>%
+        group_by(Data_Type, Sample_Name) %>%                  # Group by Data_Type and Sample_Name
+        summarise(median_expression = median(Expression), .groups = "drop") %>% # Compute median score
+        arrange(Data_Type, desc(median_expression))
+      
+      expression_data_long_gene$Sample_Name = factor(
+        x = expression_data_long_gene$Sample_Name, 
+        levels = expression_data_long_gene_sorted$Sample_Name )
+      
+      # Plot
+      
+      logFC_gene = round(DE_data[which(DE_data == gene),]$logFC,1)
+      
+      plot = ggplot(expression_data_long_gene, aes(x = Sample_Name, y = Expression, fill = Culture_Condition)) +
+        geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+        geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +
+        scale_fill_manual(values = pal_culture_condition) +  # Choose a color palette
+        labs(
+          title = paste0("Enriched pathway = ", pathway_name),
+          subtitle = paste0("Gene = ", gene, " logFC = ", logFC_gene ),
+          x = "Sample",
+          y = "log2(UMI)",
+          fill = "Culture Condition"
+        ) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 4),
+          strip.text = element_text(size = 12)
+        ) +
+        guides(fill = "none")
+      
+      plot_list[[gene_id]] = plot
+      
+      gene_id = gene_id + 1
+      
+    }
+    
+    multiple_page_layout <- gridExtra::marrangeGrob(
+      grobs = plot_list, 
+      nrow = 2, ncol = 1)
+    
+    ggsave(
+      plot = multiple_page_layout,
+      filename = paste0(out_path, time_stamp(),"plot_GSEA_",pathway_name,"_Core_Enrichement_Genes_Violins.pdf"),
+      device = "pdf",
+      width = 210,
+      height = 297,
+      unit = "mm")
+    
+    pathway_id = pathway_id + 1
+    
+  }
+  
+  collection_id = collection_id + 1
+  
+}
+
+```
+
+```{r Plot gene expression of DE Genes}
+
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDO_and_Tissue_integration",
+  exp = "4_differential_expression_all_cells/DE_Genes_Gene_Expression"
+)
+
+# Get DE genes names after 60pct positive cells filter
+DE_genes_strong <- pbDS_results_Culture_Condition_filtered %>%
+  group_by(gene) %>%  
+  filter(
+    p_adj.loc < 0.05,  # No filtering, will be accounted with score calculated in next step
+    abs(logFC) > 2 # No filtering, will be accounted with score calculated in next step
+  ) %>%
+  filter(n() == 2)
+
+DE_genes_strong = DE_genes_strong %>%
+  group_by(gene) %>%
+  arrange(desc(abs(logFC)))
+
+expression_data = sce_comb[DE_genes_strong$gene,]
+metadata = as.data.frame(colData(expression_data))
+
+expression_data = as.data.frame(t(as.matrix(assay(expression_data, "logcounts"))))  # Replace "logcounts" with the desired assay
+
+# Add metadata
+expression_data <- cbind(metadata, expression_data)
+
+# Reshape the data to long format
+expression_data_long <- expression_data %>%
+  tidyr::pivot_longer(cols = all_of(DE_genes_strong$gene), names_to = "Gene", values_to = "Expression")
+
+plot_list = list()
+gene_id = 1
+
+## Loop among gene of the gene list objects (one per collection)
+################################################################
+
+for(gene in unique(DE_genes_strong$gene)){
+  
+  # Order samples according nedian expresion of gene within Data_Type condition 
+  expression_data_long_gene = expression_data_long %>% filter(Gene == gene)
+  
+  expression_data_long_gene_sorted <- expression_data_long_gene %>%
+    group_by(Data_Type, Sample_Name) %>%                  # Group by Data_Type and Sample_Name
+    summarise(median_expression = median(Expression), .groups = "drop") %>% # Compute median score
+    arrange(Data_Type, desc(median_expression))
+  
+  expression_data_long_gene$Sample_Name = factor(
+    x = expression_data_long_gene$Sample_Name, 
+    levels = expression_data_long_gene_sorted$Sample_Name )
+  
+  # Plot
+  
+  logFC_gene = round(DE_data[which(DE_data == gene),]$logFC,1)
+  
+  plot = ggplot(expression_data_long_gene, aes(x = Sample_Name, y = Expression, fill = Culture_Condition)) +
+    geom_violin(trim = TRUE, scale = "width") +  # Violin plot
+    geom_boxplot(width = 0.4, position = position_dodge(0.5), outlier.shape = NA) +
+    scale_fill_manual(values = pal_culture_condition) +  # Choose a color palette
+    labs(
+      title = paste0("Gene = ", gene, " logFC = ", logFC_gene),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Culture Condition"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 4),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  
+  plot_list[[gene_id]] = plot
+  
+  gene_id = gene_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(),"plot_DE_Genes_Violins.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+
+
+

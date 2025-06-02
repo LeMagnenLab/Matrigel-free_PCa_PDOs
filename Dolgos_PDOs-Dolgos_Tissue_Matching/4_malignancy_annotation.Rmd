@@ -1,0 +1,495 @@
+---
+title: "4.Dolgos patient matching tissue & PDOs: malignancy annotation"
+author: "Romuald Parmentier"
+date: "2024-10-30"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(SingleR) # Cell type annotation
+library(celldex)
+library(DESeq2)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  exp = "4_malignancy_annotation"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load rescaled atlas sce object after dimension reduction
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "3_broad_cell_type_annotation", 
+  pattern = "sce_comb_broad_cell_type_annotated.rds")
+
+sce_comb = readRDS(file = file_path) 
+
+# Load Dolgos_early passage sce object after clustering and malignancy assignation
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "clustering", 
+  pattern = "sce_comb_clustered.rds")
+
+sce_comb_ref = readRDS(file = file_path) 
+
+```
+
+```{r Restrict sce object to parental datasets}
+
+indices = grep(
+  x = sce_comb$Organoid_Type,
+  pattern = "parental_tumor")
+
+sce_comb_tissue = sce_comb[,indices]
+
+```
+
+# Malignancy assignation 
+
+```{r Automatic assignation with SingleR}
+
+# Make a list with the ref and the test and restrict the features of the ref sce
+list_sce_ref_test = restrict_reorder_features_names(list(sce_comb_ref, sce_comb_tissue))
+
+sce_comb_ref = list_sce_ref_test[[1]]
+sce_comb_tissue = list_sce_ref_test[[2]]
+
+# Predict on all dataset combined object
+pred_malignancy <- SingleR(
+  test = sce_comb_tissue, 
+  ref = sce_comb_ref, 
+  assay.type.test = "logcounts",
+  assay.type.ref = "logcounts" ,
+  labels = sce_comb_ref$Malignancy, 
+  de.method = "wilcox")
+
+```
+
+```{r Manual assignation of the previously predicted malignancy on early_passage_PDOs}
+
+sce_comb$Malignancy = "TBD"
+
+# Assign the predicted malignancy to cells in tissue to sce_comb
+indices_tissue = which(colnames(sce_comb) %in% colnames(sce_comb_tissue))
+sce_comb$Malignancy[indices_tissue] = pred_malignancy$pruned.labels
+
+# Assign the previously predicted malignancy in PDOs to cells that are not coming from tissue to sce_comb
+indice_query = which(colnames(sce_comb) %in% colnames(sce_comb_ref))
+indice_match = which(colnames(sce_comb_ref) %in% colnames(sce_comb))
+sce_comb$Malignancy[indice_query] = sce_comb_ref$Malignancy[indice_match]
+
+```
+
+```{r Refine metadata}
+
+sce_comb$Malignancy = ifelse(
+  test = sce_comb$broad_type != "Epithelial cells",
+  yes = "Non applicable",
+  no = sce_comb$Malignancy)
+
+sce_comb$Malignancy_Type = ifelse(
+  test = sce_comb$broad_type != "Epithelial cells",
+  yes = sce_comb$broad_type,
+  no = sce_comb$Malignancy)
+
+```
+
+# Visualization 
+
+```{r Export metadata as tibble}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+md <- md %>%
+  group_by(broad_type) %>%        # Group by broad_type
+  filter(n() >= 10) %>%           # Keep groups with 10 or more cells
+  ungroup() 
+
+md$Malignancy_Type <- factor(
+  md$Malignancy_Type, 
+  levels = c("Tumor", "Transitioning", "Club", "Basal/Hillock", 
+             "Immune cells", "Fibroblasts", "Endothelial cells", 
+             "Keratinocytes", "Other"))
+
+# Operate rotation to UMAP coordinates to ressemble v1 of the UMAP
+##################################################################
+
+md <- md %>%
+  # Compute dataset‑wide centroid only once
+  mutate(
+    centre_x = mean(UMAP_1),
+    centre_y = mean(UMAP_2)
+  ) %>%
+  # Do the rotation around that centroid
+  mutate(
+    UMAP_rot1 = -(UMAP_2 - centre_y) + centre_x,  # new X = –(y–cy) + cx
+    UMAP_rot2 =  (UMAP_1 - centre_x) + centre_y   # new Y =  (x–cx) + cy
+  ) %>%
+  select(-centre_x, -centre_y)  # drop temporary centring columns
+
+```
+
+## Pie chart percentages
+
+```{r Count and percentage per cells for all malignancy for pie chart}
+
+# Count cell per malignancy per sample (drop =F add 0 where n observations)
+md_count <- md %>%
+  group_by(Organoid_Type, Culture_Condition, Sample_Description, Malignancy, .drop = F) %>% 
+  summarise(count = n()) 
+
+# PCT of cell per malignancy per sample
+md_percentage = md_count %>%
+  ungroup() %>%
+  group_by(Organoid_Type, Culture_Condition,  Sample_Description) %>%
+  mutate(percentage = round(count / sum(count) * 100, 1))
+
+```
+
+## UMAP
+
+```{r Facetted UMAP per malignancy colored per malignancy}
+
+sample_id = 1
+plot_list = list()
+
+for (malignancy in unique(md$Malignancy)) {
+  
+  md_other <- subset(md, Malignancy != malignancy)
+  md_malignancy <- subset(md, Malignancy == malignancy)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_rot1, y = UMAP_rot2), 
+        fill = "grey", alpha = 0.4, size = 1, color = "grey10", shape = 21, stroke = 0.2),
+      dpi = 100, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_malignancy,
+        aes(x = UMAP_rot1, y = UMAP_rot2, fill = Malignancy), 
+        alpha = 0.8, size = 2.5, color = "grey10", shape = 21, , stroke = 0.2),
+      dpi = 100, scale = 0.5
+    ) +
+    ggtitle(label = malignancy) +
+    scale_fill_manual(values = pal_cell_type) +
+    theme_classic() +
+    guides(
+      fill = "none",
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Malignancy.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r Single UMAP split by sample and colored by cell type }
+
+sample_id = 1
+plot_list = list()
+
+for (sample in unique(md$Sample_Description)) {
+  
+  md_other <- subset(md, Sample_Description != sample)
+  md_sample <- subset(md, Sample_Description == sample)
+  md_non_epithelial = md_sample %>% filter(Malignancy %in% c(NA, "Non applicable"))
+  
+  # Update both md_sample and md_other to get rid of non-epithelial cells (in md_sample) and avoid coloring them (by including them in md_other)
+  
+  md_other = rbind(md_other, md_non_epithelial)
+  md_sample = md_sample %>% filter(!c(Malignancy %in% c(NA, "Non applicable")))
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_rot1, y = UMAP_rot2), 
+        fill = "grey", alpha = 0.4, size = 1, color = "grey10", shape = 21, stroke = 0.2),
+      dpi = 100, scale = 0.5
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_sample,
+        aes(x = UMAP_rot1, y = UMAP_rot2, fill = Malignancy), 
+        alpha = 0.8, size = 2.5, color = "grey10", shape = 21, , stroke = 0.2),
+      dpi = 100, scale = 0.5
+    ) +
+    scale_fill_manual(values = pal_cell_type) +
+    theme_classic() +
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Sample_Malignancy.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+
+
+```
+
+```{r Single UMAP colored Organoid Line Type = Fig4.C}
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md,
+      aes(x = UMAP_rot1, y = UMAP_rot2, fill = Malignancy), 
+      alpha = 0.8, size = 2.5, color = "grey10", shape = 21, , stroke = 0.2),
+    # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+    dpi = 200, scale = 0.5) +
+  scale_fill_manual(values = pal_cell_type) +
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none"
+  )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Single_Malignancy.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8,
+)
+
+```
+
+## Pseudobulked PCA
+
+```{r Computing psudobulk sum of raw reads accross cells within samples}
+
+sce_comb$Sample_Cell_Type = paste(sce_comb$Sample_Description , sce_comb$Malignancy, sep = "_")
+
+# Pseudobulk counts
+pseudobulked_sce_comb <- aggregateAcrossCells(sce_comb, ids = sce_comb$Sample_Cell_Type)
+
+# Inspect the result
+pseudobulk_counts_table = assay(pseudobulked_sce_comb, "counts")
+pseudobulk_counts_table <- apply(pseudobulk_counts_table, c(1, 2), function(x) round(x, digits = 0))
+pseudobulk_counts_table = as_tibble(pseudobulk_counts_table)
+pseudobulk_counts_table = pseudobulk_counts_table %>%
+  mutate(gene = rowData(pseudobulked_sce_comb)$ENSEMBL) %>%
+  relocate(gene)
+
+# Export the table
+write.csv(
+  x = pseudobulk_counts_table,
+  file = paste0(out_path, time_stamp(), "table_PseudoBulked_counts_sample_cell_type.csv"),
+  row.names = F
+)
+
+```
+
+# Pseudobulked PCA reviewer's response)
+
+## Split by sample and cell-type PCA plot 
+
+```{r}
+
+# List of unique samples
+sce_comb$Patient_ID = sub(pattern = "_.*", "", sce_comb$Sample_Description)
+patient_list = unique(sce_comb$Patient_ID)
+
+# Initialize list to collect results
+pca_results_list <- list()
+
+```
+
+```{r Calculate PCA}
+
+for (patient in patient_list) {
+  
+  message("Processing: ", patient)
+  
+  # Subset SCE
+  sce_sub <- sce_comb[, sce_comb$Patient_ID == patient]
+  
+  # Define sample+celltype ID
+  sce_sub$Condition_Malignancy <- paste(sce_sub$Culture_Condition, sce_sub$Malignancy, sep = "_")
+  
+  # Pseudobulk
+  pb <- aggregateAcrossCells(sce_sub, ids = sce_sub$Condition_Malignancy)
+  counts <- assay(pb, "counts")
+  counts <- round(counts)
+  
+  # Filter low genes
+  keep_genes <- rowSums(counts) > 10
+  counts <- counts[keep_genes, ]
+  
+  # VST normalization
+  sample_names <- colnames(counts)
+  coldata <- data.frame(row.names = sample_names)
+  dds <- DESeqDataSetFromMatrix(countData = counts, colData = coldata, design = ~1)
+  vsd <- vst(dds, blind = TRUE)
+  mat_vst <- assay(vsd)
+  
+  # PCA
+  pca <- prcomp(t(mat_vst), scale. = TRUE)
+  pca_df <- as.data.frame(pca$x)
+  pca_df$Condition_Malignancy <- rownames(pca_df)
+  
+  # Metadata extraction
+  pca_df <- pca_df %>%
+    mutate(Sample = patient,
+           Malignancy = sub(".*_", "", Condition_Malignancy),
+           Culture_Condition = sub("_.*", "",Condition_Malignancy)) %>%
+    filter(!(Malignancy %in% c("NA", "Non applicable")))
+  
+  # Store result
+  pca_results_list[[patient]] <- pca_df
+  
+}
+
+```
+
+```{r}
+
+# Combine all results
+pca_combined_df <- bind_rows(pca_results_list)
+
+# Plot with faceting per sample
+plot = ggplot(pca_combined_df, aes(PC1, PC2, color = Malignancy, shape = Culture_Condition)) +
+  geom_point(size = 3) +
+  labs(title = "PCA of Pseudobulked Cell Types (Per Sample)",
+       x = "PC1", y = "PC2") +
+  facet_wrap(~Sample)
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Pseudobulked_Patient_CultureCondition_Malignancy.pdf"),
+  device = "pdf",
+  width = 7,
+  height = 5)
+
+```
+
+## Split by sample and culture condition PCA plot 
+
+```{r}
+
+sce_comb$Patient_Culture = paste(sce_comb$Patient_ID, sce_comb$Culture_Condition, sep = "_")
+
+pb <- aggregateAcrossCells(sce_comb, ids = sce_comb$Patient_Culture)
+counts <- assay(pb, "counts")
+counts <- round(counts)
+
+# Filter low genes
+keep_genes <- rowSums(counts) > 10
+counts <- counts[keep_genes, ]
+
+# VST normalization
+sample_names <- colnames(counts)
+coldata <- data.frame(row.names = sample_names)
+dds <- DESeqDataSetFromMatrix(countData = counts, colData = coldata, design = ~1)
+vsd <- vst(dds, blind = TRUE)
+mat_vst <- assay(vsd)
+
+# PCA
+pca <- prcomp(t(mat_vst), scale. = TRUE)
+pca_df <- as.data.frame(pca$x)
+
+pca_df$Patient_Culture <- rownames(pca_df)
+
+pca_df <- pca_df %>%
+  mutate(Patient = sub("_.*", "", Patient_Culture),
+         Culture = sub(".*_", "", Patient_Culture))
+
+
+```
+
+```{r}
+
+# Plot with faceting per sample
+plot = ggplot(pca_df, aes(PC1, PC2, color = Culture )) +
+  geom_point(size = 3) +
+  labs(title = "PCA of Pseudobulked per Sample)",
+       x = "PC1", y = "PC2") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Pseudobulked_Patient_CultureCondition.pdf"),
+  device = "pdf",
+  width = 5,
+  height = 4)
+
+```
+
+# Export files
+
+```{r Export sce_comb object}
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_malignancy_annotated.rds"))
+
+```
+

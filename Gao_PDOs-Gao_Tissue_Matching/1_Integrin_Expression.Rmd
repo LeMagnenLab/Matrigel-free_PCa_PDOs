@@ -1,0 +1,249 @@
+---
+title: "GAO PDOs (MSK-series) & matching tumor tissue: Integrin exploration"
+author: "Romuald Parmentier"
+date: "2025-01-23"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(scran)
+library(stringr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Gao_PDOs-Gao_Tissue_Matching",
+  exp = "1_integrin_exploration"
+)
+
+```
+
+# Prepare the data
+
+MSK Data downloaded here :
+
+https://www.cbioportal.org/study/summary?id=prad_mskcc_cheny1_organoids_2014&plots_horz_selection=%7B%22selectedGeneOption%22%3A3672%2C%22dataType%22%3A%22MRNA_EXPRESSION%22%7D&plots_vert_selection=%7B%22dataType%22%3A%22MRNA_EXPRESSION%22%2C%22selectedDataSourceOption%22%3A%22rna_seq_mrna%22%2C%22logScale%22%3A%22true%22%7D&plots_coloring_selection=%7B%7D
+
+# RPKM
+
+```{r Load the files}
+
+# Load sce object after quality control
+data_rpkm <- read.delim("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Pre_Processed_Data/MSK_PCa_PDOs_Gao_2014/data_mrna_seq_rpkm.txt")
+data_rpkm <- data_rpkm[!duplicated(data_rpkm), ]
+
+data_rpkm_tibble = as_tibble(data_rpkm)
+
+```
+
+```{r Format matrix }
+
+# Add a number behind duplicated gene names (keeping the first occurence as the original one)
+data_rpkm_tibble = data_rpkm_tibble %>%
+  group_by(Hugo_Symbol) %>%
+  mutate(Hugo_Symbol_unique = case_when(
+    n() > 1 ~ paste0(Hugo_Symbol,"_", row_number()+1),
+    TRUE ~ Hugo_Symbol)) %>%
+  dplyr::ungroup() 
+
+
+```
+
+```{r Make a matrix with col and row of interest}
+
+# Select cols (= samples)
+########################
+
+col_to_keep = c(
+  "MSK.PCa2.m", "MSK.PCa2.o", 
+  "MSK.PCa6.m", "MSK.PCa6.o",
+  "MSK.PCa7.m", "MSK.PCa7.o")
+
+filtered_matrix = as.matrix(data_rpkm_tibble[ , col_to_keep])
+
+# Select rows (= genes)
+#######################
+
+# Define the integrin genes
+genes_list <- c("ITGB1",
+                "ITGA1", "ITGA2", "ITGA10", "ITGA11","ITGB4",  # Collagen binding
+                "ITGA3", "ITGA6", "ITGA7", "ITGB2","ITGB3",
+                "ITGB6","ITGB7","ITGB8", "ITGA4", "ITGA5", "ITGA8", "ITGA9",     # Other integrins
+                "ITGB5", "ITGAV")
+
+# Set ronames
+rownames(filtered_matrix) = data_rpkm_tibble$Hugo_Symbol_unique
+
+# Filter matrix with genes of interst
+filtered_matrix = filtered_matrix[which(rownames(filtered_matrix) %in% genes_list), ]
+
+# Reorder matrix according the order of genes_list
+filtered_matrix <- filtered_matrix[match(genes_list, rownames(filtered_matrix)), ]
+
+```
+
+```{r Draw RPKM heatmap}
+
+# Colum split vectors 
+
+Data_Type_Details = factor(c(
+   "Tissue", "PDOs",
+   "Tissue", "PDOs",
+   "Tissue", "PDOs")
+)
+
+Sample_name = c(1,1,2,2,3,3)
+
+
+# Define heatmap annotation
+heatmap_anno <- HeatmapAnnotation(
+  Data_Type_Details = Data_Type_Details,
+  col = list(
+    Data_Type_Details = pal_data_type_details
+  ),
+  show_legend = c(Data_Type_Details = TRUE),
+  show_annotation_name = TRUE
+)
+
+{
+  
+  pdf_file_name <- paste0(out_path, time_stamp(), "plot_Heatmap_focus_ITG_RPKM.pdf")
+  
+  # Open PDF device
+  pdf(file = pdf_file_name, width = 14, height = 8)
+  
+  # Generate heatmap
+  print(Heatmap(
+    matrix = filtered_matrix, 
+    cluster_column_slices = FALSE,
+    top_annotation = heatmap_anno,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    show_column_dend = FALSE,
+    show_column_names = TRUE,
+    show_row_dend = FALSE,
+    column_split = Sample_name,
+    use_raster = TRUE,
+    col = c("lightgrey", paletteer_c("viridis::plasma", 30)),
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "RPKM"),
+    column_title_rot = 45
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+
+# TPM
+
+```{r Transform rpkm into TPM}
+
+# Step 1: Calculate the sum of RPK values (across all genes for each sample)
+rpk_sum <- colSums(data_rpkm[,-1])
+
+# Step 2: Convert RPKM to TPM for each gene in each sample
+# We divide each RPKM value by the sum of RPK values for that sample, then multiply by 1 million
+data_tpm <- sweep(data_rpkm[,-1], 2, rpk_sum, FUN = "/") * 1e6
+
+```
+
+```{r Make a matrix with col and row of interest}
+
+# Select cols (= samples)
+########################
+
+col_to_keep = c(
+  "MSK.PCa2.m", "MSK.PCa2.o", 
+  "MSK.PCa6.m", "MSK.PCa6.o",
+  "MSK.PCa7.m", "MSK.PCa7.o")
+
+filtered_matrix = as.matrix(data_tpm[ , col_to_keep])
+
+# Select rows (= genes)
+#######################
+
+# Define the integrin genes
+genes_list <- c(
+                "ITGA1", "ITGA2", "ITGA10", "ITGA11","ITGB4",  # Collagen binding
+                "ITGA3", "ITGA6", "ITGA7", "ITGB2","ITGB3",
+                "ITGB6","ITGB7","ITGB8", "ITGA4", "ITGA5", "ITGA8", "ITGA9",     # Other integrins
+                "ITGB5", "ITGAV")
+
+# Set ronames
+rownames(filtered_matrix) = data_rpkm_tibble$Hugo_Symbol_unique
+
+# Filter matrix with genes of interst
+filtered_matrix = filtered_matrix[which(rownames(filtered_matrix) %in% genes_list), ]
+
+# Reorder matrix according the order of genes_list
+filtered_matrix <- filtered_matrix[match(genes_list, rownames(filtered_matrix)), ]
+
+```
+
+```{r Draw TPM heatmap}
+
+# Colum split vectors 
+
+Data_Type_Details = factor(c(
+   "Tissue", "PDOs",
+   "Tissue", "PDOs",
+   "Tissue", "PDOs")
+)
+
+Sample_name = c(1,1,2,2,3,3)
+
+
+# Define heatmap annotation
+heatmap_anno <- HeatmapAnnotation(
+  Data_Type_Details = Data_Type_Details,
+  col = list(
+    Data_Type_Details = pal_data_type_details
+  ),
+  show_legend = c(Data_Type_Details = TRUE),
+  show_annotation_name = TRUE
+)
+
+{
+  
+  pdf_file_name <- paste0(out_path, time_stamp(), "plot_Heatmap_focus_ITG_TPM.pdf")
+  
+  # Open PDF device
+  pdf(file = pdf_file_name, width = 14, height = 8)
+  
+  # Generate heatmap
+  print(Heatmap(
+    matrix = filtered_matrix, 
+    cluster_column_slices = FALSE,
+    top_annotation = heatmap_anno,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    show_column_dend = FALSE,
+    show_column_names = TRUE,
+    show_row_dend = FALSE,
+    column_split = Sample_name,
+    use_raster = TRUE,
+    col = c("lightgrey", paletteer_c("viridis::plasma", 30)),
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "TPKM"),
+    column_title_rot = 45
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+
+

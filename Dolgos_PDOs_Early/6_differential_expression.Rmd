@@ -1,0 +1,763 @@
+---
+title: '6.Dolgos Early Passage PDOs : Differential expression'
+author: "Romuald Parmentier"
+date: "2024-11-13"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ComplexHeatmap)
+library(ggrepel)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  exp = "6_differential_expression"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_Early",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Differential expression and visualisation
+
+## Perform DE between Walktrap Clusters
+----------------------------------------
+
+```{r Seurat FindAllMarkers between walktrap 30}
+
+
+Idents(seurat_comb) = "walktrap_30"
+
+walktrap_30_DE_genes <- 
+  FindAllMarkers(
+    seurat_comb,
+    slot = "data",
+    only.pos = T, # True gives only upregulated genes in each cluster against all the others
+    min.pct = 0.5, # Minimum pct of cells expressing the gene in either of the two pop
+    logfc.threshold = 0.5, # Limit testing to genes which show, on average, at least X-fold difference (default)
+    test.use = "wilcox")
+
+
+# Export the list of genes in seurat and csv
+
+saveRDS(
+  object = walktrap_30_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Object_walktrap_30.rds")
+)
+
+write.csv(
+  x = walktrap_30_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Table_walktrap_30.csv"))
+
+```
+
+### Dot plot visualization
+
+```{r Prepare expresison data for ggplot2}
+
+DE_genes_selection <- c(
+  "FOLH1", "KLK2", "KLK3", "SPOCK1", "AMACR", "KLK4", "FAM3B", "NKX3-1", "STEAP4", "STEAP2",
+  "MKI67", "TOP2A", "NUSAP1", "KIFC1", "KIF2C", 
+  "MUC5AC", "MUC5B", "MMP7", "CP", "RARRES1", "PSCA",
+  "CEACAM5", "IGFBP3", "WFDC2", "CEACAM6", "TACSTD2",
+  "LY6D", "SERPINB3", "KRT13", "KRT5", "S100A2", 
+  "WNT4", "WNT10A", "AREG", "ITGB1", "DKK1", 
+  "DLGAP5", "OLFM1", "MUC13", "USP13", "NRGN")
+
+
+# Extraire les données d'expression normalisées
+expression_data <- GetAssayData(seurat_comb, assay = "originalexp", layer = "data")[DE_genes_selection, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Ajouter la colonne des groupes d'identité
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("walktrap_30") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(group = "walktrap_30")
+
+# Calculer les moyennes et pourcentages d'expression
+dotplot_data <- expression_data %>%
+  group_by(feature, group) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_expression = mean(expression > 0) * 100
+  )
+
+dotplot_data$feature = factor(dotplot_data$feature, levels = DE_genes_selection)
+
+```
+
+```{r Dot plot visualisation = Fig3.E}
+
+plot = ggplot(dotplot_data, aes(x = feature, y = group)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  viridis::scale_fill_viridis(option = "magma", direction = -1, name = "Avg Expression") +
+  # Customize size scale
+  scale_size_continuous(name = "Percent Expression", range = c(0, 6)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  labs(title = "Custom DotPlot with ggplot2")
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_DE_genes_walktrap_30.pdf"),
+  width = 10,
+  height = 7,
+  device = "pdf")
+
+
+```
+
+### Heatmap visualization
+
+```{r Randomly select 200 cells per walktrap_30 cluster}
+
+# Set the seed for reproducibility of the downsampling
+set.seed(123)
+
+# Downsample function
+downsample_sce <- function(sce, group_column, n_per_group) {
+  # Check if group_column exists in colData
+  if (!group_column %in% colnames(colData(sce))) {
+    stop("The specified group_column does not exist in the metadata.")
+  }
+  
+  # Extract metadata and create a downsampling index
+  metadata_df <- as.data.frame(colData(sce))
+  
+  # Downsample the cells per group using dplyr
+  sampled_metadata <- metadata_df %>%
+    mutate(row_index = row_number()) %>%
+    group_by(!!sym(group_column)) %>%
+    sample_n(size = min(n_per_group, n()), replace = FALSE) %>%
+    arrange(desc(Culture_Condition)) %>%
+    ungroup()
+  
+  # Subset the SCE object based on the sampled cells
+  downsampled_sce <- sce[, sampled_metadata$row_index]
+  
+  return(downsampled_sce)
+}
+
+# Create a randomly selected sce woith 200 cells per walktrap cluster
+sce_comb_downsampled = downsample_sce(sce = sce_comb,group_column = "walktrap_30", n_per_group = 200)
+
+```
+
+```{r Select only top 10 genes per walktrap30 cluster}
+
+# Use the custom order to arrange the data
+walktrap_30_DE_genes_top10 <- walktrap_30_DE_genes %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) %>%
+  arrange(cluster, desc(avg_log2FC)) %>%
+  ungroup() %>%
+  distinct(gene, .keep_all = T)
+
+# Extract the matrix with logcounts of selected genes only
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled[walktrap_30_DE_genes_top10$gene, ]))
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled[walktrap_30_DE_genes_top10$gene, ]))
+
+# Names the rows according the tested genes
+rownames(sce_comb_downsampled_mtx) = walktrap_30_DE_genes_top10$gene
+
+```
+
+```{r Make heatmap = Figure S3b}
+
+heatmap_anno = HeatmapAnnotation(
+  Clusters = factor(sce_comb_downsampled$walktrap_30, levels = unique(sce_comb_downsampled$walktrap_30)), # Has to be a factor
+  col = list(
+    Clusters = pal_walktrap_cluster),  
+  show_legend = c(Clusters = F, Conditions = F), 
+  show_annotation_name = T)
+
+{
+  
+  pdf(
+    file = paste0(out_path,time_stamp(),"plot_Heatmap_top10genes_walktrap30.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = sce_comb_downsampled_mtx,
+    cluster_rows = F,
+    cluster_columns = F, # If TRUE it will try to cluster cells
+    column_split = sce_comb_downsampled$walktrap_30, # Will seperate clusters
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = c("lightgrey",rev(paletteer_c("viridis::magma", 30))), # or col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "log2(UMI_count)")
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+
+## Perform DE between walktrap cluster 1 & 8 (= tumor) vs the orhers
+------------------------------------------------------------------
+
+```{r Seurat FindAllMarkers between cluster_1.8 vs the others}
+
+seurat_comb$Cluster_1_8 = ifelse(
+  test = seurat_comb$walktrap_30 %in% c(1,8) ,
+  yes = "Cluster_1.8" ,
+  no = "Cluster_2.3.4.5.6.7")
+
+Idents(seurat_comb) = "Cluster_1_8"
+
+Cluster_1_8_DE_genes <- 
+  FindAllMarkers(
+    seurat_comb,
+    slot = "data",
+    only.pos = F, # True gives only upregulated genes in each cluster against all the others
+    min.pct = 0.75, # Minimum pct of cells expressing the gene in either of the two pop
+    logfc.threshold = 1, # Limit testing to genes which show, on average, at least X-fold difference (default)
+    test.use = "wilcox")
+
+# Export the list of genes in seurat and csv
+
+saveRDS(
+  object = Cluster_1_8_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Object_Cluster_1_8.rds")
+)
+
+write.csv(
+  x = Cluster_1_8_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Table_Cluster_1_8.csv"))
+
+```
+
+### Heatmap visualization
+
+```{r Sort sce_downsampled object according Tumor vs other}
+
+# Add the Cluster_1_8 column to the metadata of the sce_comb_downsample object
+sce_comb_downsampled$Cluster_1_8 = ifelse(
+  test = sce_comb_downsampled$walktrap_30 %in% c(1,8) ,
+  yes = "Cluster_1.8" ,
+  no = "Cluster_2.3.4.5.6.7")
+
+# Sort the cells of the sce_downsampled with first ells from Cluster_234567 and then cluster_18
+sorted_index <- rev(order(sce_comb_downsampled$Cluster_1_8))
+sce_comb_downsampled <- sce_comb_downsampled[, sorted_index]
+
+```
+
+```{r Select only top 10 genes per Cluster_1.8 and Others cluster}
+
+# Use the custom order to arrange the data
+Cluster_1_8_DE_genes_top10 <- Cluster_1_8_DE_genes %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) %>%
+  arrange(cluster, desc(avg_log2FC)) %>%
+  ungroup() %>%
+  distinct(gene, .keep_all = T)
+
+# Extract the matrix with logcounts of selected genes only
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled[Cluster_1_8_DE_genes_top10$gene, ]))
+
+# Names the rows according the tested genes
+rownames(sce_comb_downsampled_mtx) = Cluster_1_8_DE_genes_top10$gene
+
+```
+
+```{r Make heatmap = Figure 3g}
+
+heatmap_anno = HeatmapAnnotation(
+  Cluster_1_8 = factor(sce_comb_downsampled$Cluster_1_8, levels = unique(sce_comb_downsampled$Cluster_1_8)), # Has to be a factor
+  col = list(
+    Cluster_1_8 = c( "Cluster_2.3.4.5.6.7" = "#3CB22D","Cluster_1.8" = "#A60020")),
+  show_legend = c(Clusters = F, Conditions = F), 
+  show_annotation_name = T)
+
+{
+  
+  pdf(
+    file = paste0(out_path,time_stamp(),"plot_Heatmap_top10genes_Cluster_1_8.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = sce_comb_downsampled_mtx,
+    cluster_rows = F,
+    cluster_columns = F, # If TRUE it will try to cluster cells
+    column_split = sce_comb_downsampled$Cluster_1_8, # Will seperate clusters
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = c("lightgrey",rev(paletteer_c("viridis::magma", 30))), # or col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "log2(UMI_count)")
+  ))
+  
+  dev.off()
+  
+}
+
+
+```
+
+
+## Perform DE between tumor cells of different samples
+-------------------------------------------------------
+
+```{r Seurat FindAllMarkers between Tumor and others}
+
+seurat_comb_tumor = subset(
+  x = seurat_comb,
+  subset = Cluster_1_8 == "Cluster_1.8")
+
+seurat_comb_tumor = subset(
+  x = seurat_comb_tumor, 
+  subset = Sample_Description %in% c("P24-14_Org_ECMf", "P24-06_Org_ECMf", "P23-53_Org_ECMf", "P23-51_Org_ECMf", "P23-36_Org_ECMf"))
+
+Idents(seurat_comb_tumor) = "Sample_Description"
+
+tumor_ECMf_PDOs_DE_genes <- 
+  FindAllMarkers(
+    seurat_comb_tumor,
+    slot = "data",
+    only.pos = FALSE, 
+    min.pct = 0.5, 
+    logfc.threshold = 1, 
+    test.use = "wilcox")
+
+# Export the list of genes in seurat and csv
+
+saveRDS(
+  object = tumor_ECMf_PDOs_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Object_tumor_ECMf_PDOs.rds")
+)
+
+write.csv(
+  x = tumor_ECMf_PDOs_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Table_tumor_ECMf_PDOs.csv"))
+
+
+```
+
+### Dotplot visualization
+
+```{r Prepare expresison data for ggplot2}
+
+DE_genes_selection <- c("ERG", "ALDH1A1", "VIM", "MSH2")
+
+# Extraire les données d'expression normalisées
+expression_data <- GetAssayData(seurat_comb_tumor, assay = "originalexp", layer = "data")[DE_genes_selection, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Ajouter la colonne des groupes d'identité
+meta_data <- seurat_comb_tumor@meta.data %>% 
+  dplyr::select("Sample_Description") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(group = "Sample_Description")
+
+# Calculer les moyennes et pourcentages d'expression
+dotplot_data <- expression_data %>%
+  group_by(feature, group) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_expression = mean(expression > 0) * 100
+  )
+
+dotplot_data$feature = factor(dotplot_data$feature, levels = DE_genes_selection)
+
+```
+
+```{r Dot plot visualisation = Fig4.a}
+
+plot = ggplot(dotplot_data, aes(x = feature, y = group)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  viridis::scale_fill_viridis(option = "magma", direction = -1, name = "Avg Expression") +
+  # Customize size scale
+  scale_size_continuous(name = "Percent Expression", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  labs(title = "Custom DotPlot with ggplot2")
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_DE_genes_tumor_ECMf_PDOs.pdf"),
+  width = 8,
+  height = 6,
+  device = "pdf")
+
+
+```
+
+# Perform DE between different malignancy categories
+---------------------------------------------------
+
+```{r Seurat FindAllMarkers between Malignancies}
+
+Idents(seurat_comb) = "Malignancy"
+
+Malignancy_DE_genes <- 
+  FindAllMarkers(
+    seurat_comb,
+    slot = "data",
+    only.pos = FALSE, 
+    min.pct = 0.75, 
+    logfc.threshold = 1, 
+    test.use = "wilcox")
+
+# Export the list of genes in seurat and csv
+
+saveRDS(
+  object = Malignancy_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Object_Malignancy.rds")
+)
+
+write.csv(
+  x = Malignancy_DE_genes,
+  file = paste0(out_path, time_stamp(),"Seurat_DE_Table_Malignancy.csv"))
+
+
+```
+
+### Dot plot visualization
+
+```{r Prepare expresison data for ggplot2}
+
+Malignancy_DE_genes_top10 <- Malignancy_DE_genes %>%
+  group_by(cluster) %>%
+  top_n(n = 10, wt = avg_log2FC) %>%
+  arrange(cluster, desc(avg_log2FC)) %>%
+  ungroup() %>%
+  distinct(gene, .keep_all = T)
+
+# Extraire les données d'expression normalisées
+expression_data <- GetAssayData(seurat_comb, assay = "originalexp", layer = "data")[Malignancy_DE_genes_top10$gene, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Ajouter la colonne des groupes d'identité
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("Malignancy") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") %>%
+  left_join(meta_data, by = "cell") %>%
+  rename(group = "Malignancy")
+
+# Calculer les moyennes et pourcentages d'expression
+dotplot_data <- expression_data %>%
+  group_by(feature, group) %>%
+  summarize(
+    avg_expression = mean(expression),
+    percent_expression = mean(expression > 0) * 100
+  )
+
+dotplot_data$feature = factor(dotplot_data$feature, levels = Malignancy_DE_genes_top10$gene)
+
+```
+
+```{r Dot plot visualisation = equivalent of FigS5.a}
+
+plot = ggplot(dotplot_data, aes(x = feature, y = group)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  viridis::scale_fill_viridis(option = "magma", direction = -1, name = "Avg Expression") +
+  # Customize size scale
+  scale_size_continuous(name = "Percent Expression", range = c(0.5, 6)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  labs(title = "Custom DotPlot with ggplot2")
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_DE_genes_malignancy.pdf"),
+  width = 10,
+  height = 7,
+  device = "pdf")
+
+
+```
+
+
+## Perform DE between ECMf vs Matrigel per Malignancy (reviewers'comment)
+----------------------------------------
+
+```{r Seurat FindAllMarkers culture condion}
+
+seurat_comb$Malignancy_Condition = paste0(seurat_comb$Malignancy,"_",seurat_comb$Culture_Condition)
+Idents(seurat_comb) = "Malignancy_Condition"
+
+# Remove
+seurat_comb_wo_tumor = seurat_comb[,which(seurat_comb$Malignancy != "Tumor")]
+
+Malignancy_Condition_DE_genes_combined = tibble()
+
+for(malignancy in unique(seurat_comb_wo_tumor$Malignancy)){
+  
+  print(paste0("DE for ",malignancy))
+  
+  condition_DE_genes <- 
+    FindMarkers(
+      seurat_comb_wo_tumor,
+      ident.1 = paste0(malignancy,"_","Matrigel"),
+      ident.2 = paste0(malignancy,"_","ECMf"),
+      slot = "data",
+      only.pos = F, # True gives only upregulated genes in each cluster against all the others
+      min.pct = 0.9, 
+      logfc.threshold = 0, # Limit testing to genes which show, on average, at least X-fold difference (default)
+      test.use = "wilcox")
+  
+  condition_DE_genes$DE_group = malignancy
+  
+  condition_DE_genes$gene = rownames(condition_DE_genes)
+  
+  Malignancy_Condition_DE_genes_combined = rbind(Malignancy_Condition_DE_genes_combined, condition_DE_genes)
+  
+}
+
+
+```
+
+### Heatmap visualization
+
+```{r Randomly select xxx cells per group}
+
+# Set the seed for reproducibility of the downsampling
+set.seed(123)
+
+# Create a varaible combining the cell type and the culture condition
+sce_comb$Malignancy_Condition = paste0(sce_comb$Malignancy,"_", sce_comb$Culture_Condition)
+
+sce_comb_wo_tumor = sce_comb[,which(sce_comb$Malignancy != "Tumor")]
+
+# Create a randomly selected sce woith 200 cells per walktrap cluster
+sce_comb_wo_tumor_downsampled = downsample_sce(sce = sce_comb_wo_tumor, group_column = "Malignancy_Condition", n_per_group = 200)
+
+# Extract the matrix with logcounts of selected genes (abs(avg_log2FC) > 2) only
+
+Malignancy_Condition_DE_genes_combined_highFC = Malignancy_Condition_DE_genes_combined %>%
+  filter(abs(avg_log2FC) > 2 )
+
+DE_genes = Malignancy_Condition_DE_genes_combined_highFC %>% select(gene) %>% as.vector() %>% unlist()
+
+sce_comb_wo_tumor_downsampled_mtx = as.matrix(logcounts(sce_comb_wo_tumor_downsampled[DE_genes, ]))
+
+# Names the rows according the tested genes
+rownames(sce_comb_wo_tumor_downsampled_mtx) = DE_genes
+
+# Extract scale.data
+seurat_comb_wo_tumor_downsampled_mtx = GetAssayData(
+  object = seurat_comb_wo_tumor,
+  assay = "originalexp", 
+  layer = "scale.data")[DE_genes, colnames(sce_comb_wo_tumor_downsampled)]
+
+```
+
+```{r Make heatmap = Figure S3b}
+
+pal_Malignancy_Condition <- c(
+  "Basal/Hillock_Matrigel"    = "#4CD53A",  # lightened "#3CB22D"
+  "Club_Matrigel"             = "#FFD633",  # lightened "#FFCC00"
+  "Transitioning_Matrigel"    = "#FF8940",  # lightened "#FF6E00"
+  # "Tumor_Matrigel"            = "#CC0026",  # lightened "#A60020"
+  "Basal/Hillock_ECMf"        = "#2A7D1E",  # darkened  "#3CB22D"
+  "Club_ECMf"                 = "#CC9900",  # darkened  "#FFCC00"
+  "Transitioning_ECMf"        = "#CC5800"  # darkened  "#FF6E00"
+  # "Tumor_ECMf"                = "#800016"   # darkened  "#A60020"
+)
+
+heatmap_anno = HeatmapAnnotation(
+  Group = factor(sce_comb_wo_tumor_downsampled$Malignancy_Condition, levels = unique(sce_comb_wo_tumor_downsampled$Malignancy_Condition)), # Has to be a factor
+  col = list(
+    Group = pal_Malignancy_Condition),  
+  show_legend = c(Clusters = F, Conditions = F), 
+  show_annotation_name = T)
+
+{
+  
+  pdf(
+    file = paste0(out_path,time_stamp(),"plot_Heatmap_Malignancy_Condition.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = seurat_comb_wo_tumor_downsampled_mtx,
+    cluster_rows = T, # Cluster cells within DE groups (Malignancy)
+    cluster_row_slices = F, # Prevents gene groups. to be clustrer among each others
+    cluster_column_slices = F, # Prevents cell groups. to be clustrer among each others
+    cluster_columns = T, # Cluster cells within cell groups (Malignancy)
+    column_split = sce_comb_wo_tumor_downsampled$Malignancy_Condition, # Will seperate clusters
+    row_split = Malignancy_Condition_DE_genes_combined_highFC$DE_group, # Will seperate clusters
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = circlize::colorRamp2(breaks = seq(-3, 3, length.out = length(pal_zscore)), colors = pal_zscore),
+    row_names_gp = grid::gpar(fontsize = 5),
+    row_title_rot = 0,
+    column_title_rot = 45,
+    heatmap_legend_param = list(title = "scale.data")
+  ))
+  
+  dev.off()
+  
+}
+
+
+```
+
+```{r Make MA plots}
+
+condition_DE_genes_list = Malignancy_Condition_DE_genes_combined %>%
+  dplyr::group_split(DE_group)
+
+names(condition_DE_genes_list) = unique(condition_DE_genes_combined$DE_group)
+
+plot_list = list()
+plot_id = 1
+
+for (Malignancy_group in names(condition_DE_genes_list)) {
+  
+  genes_FC = condition_DE_genes_list[[Malignancy_group]]
+  
+  sce_group = sce_comb[, which(sce_comb$Malignancy == Malignancy_group)]
+  sce_group = sce_group[which(rownames(sce_group) %in%  genes_FC$gene),]
+  
+  genes_FC$log10_p_val = -log10(genes_FC$p_val_adj)
+  genes_FC$significant = ifelse(genes_FC$p_val_adj < 0.001, yes = "yes", no = "no")
+  genes_FC$high_FC = ifelse(
+    test = abs(genes_FC$avg_log2FC) > 2 & genes_FC$significant == "yes" , 
+    yes = "yes", no = "no")
+  
+  genes_FC$avg_expression = apply(
+    X = as.matrix(logcounts(sce_group)), 
+    MARGIN = 1, 
+    FUN = mean)
+  
+  # Label points with high absolute log2FC
+  genes_FC$label_gene <- ifelse(abs(genes_FC$avg_log2FC) > 2, genes_FC$gene, NA)
+  
+  plot_list[[plot_id]] = ggplot(data = genes_FC, aes(x = avg_expression, y = avg_log2FC)) + 
+    geom_point(aes(fill = high_FC), alpha = 0.8, size = 2, shape = 21) +
+    scale_fill_manual(values = c("yes" = "darkred", "no" = "lightgrey")) + 
+    geom_text_repel(aes(label = label_gene), size = 2, max.overlaps = 100, box.padding = 0.3) +
+    theme_classic() + 
+    labs(title = paste0(Malignancy_group)) +
+    guides(
+      alpha = "none",
+      size = "none"
+    ) +
+    xlim(c(0, 6)) +
+    # ylim(c(-8,8)) +
+    # Add transparent colored rectangles
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = 8, 
+             fill = "#FF1493", alpha = 0.2) +  # pinkish
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = -8, ymax = 0, 
+             fill = "#008B8B", alpha = 0.2) +  # blueish
+    # Add labels inside the rectangles
+    annotate("text", x = 5, y = 6.5, label = "Up in Matrigel", size = 3.5, fontface = "bold", color = "deeppink4") +
+    annotate("text", x = 5, y = -6.5, label = "Up in Matrigel-free", size = 3.5, fontface = "bold", color = "darkslategray") +     
+    geom_hline(yintercept = c(2, -2), linetype = "dotted", color = "black") +
+    scale_y_continuous(breaks = seq(-8, 8, by = 2)) 
+  
+  
+  plot_id = plot_id + 1
+  
+}
+
+# Create a multi-page layout for the plots
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1
+)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path, time_stamp(),"MA_plot_","DE_genes.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 10
+)
+
+```
+
+
+
+

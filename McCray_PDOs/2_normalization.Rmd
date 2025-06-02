@@ -1,0 +1,85 @@
+---
+title: "2.McCray_2019 (PDOs): Normalization"
+author: "Romuald Parmentier"
+date: "2024-03-26"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(scran)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Dolgos_2024",
+  organ = "Prostate",
+  samples_ID = "McCray_PDOs",
+  exp = "2_normalization"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce object after quality control
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "McCray_PDOs",
+  prev_exp = "1_quality_controls", 
+  pattern = "sce_qc.rds")
+
+sce = readRDS(file = file_path) 
+
+```
+
+
+```{r}
+
+# Filter out cells from sce object
+sce = sce[ ,which(sce$qc_discarded == FALSE)]
+
+```
+
+# Normalization 
+
+```{r quickCluster and logNormCounts}
+
+set.seed(100)
+
+  # Pre-clustering step
+  print("Pre-clustering ongoing...")
+  clust.sce = quickCluster(sce)
+  
+  # # Adds a sizeFactor col in metadata, sizeFactors are here computed "cluster-wise"
+  print("Calculating size factors ongoing...")
+  sce <- computeSumFactors(sce, clusters = clust.sce)
+  
+  ## Normalize (using already calculated size factors)
+  print("Log normalization ongoing...")
+  sce <- logNormCounts(sce, size.factors = sce$sizeFactor) 
+  
+
+```
+
+# Batch rescaling 
+
+No batch rescaling needed here, as all cells are coming from one batch
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export normalized object
+saveRDS(
+  object = sce,
+  file = paste0(out_path,time_stamp(),"sce_normalized.rds"))
+
+```

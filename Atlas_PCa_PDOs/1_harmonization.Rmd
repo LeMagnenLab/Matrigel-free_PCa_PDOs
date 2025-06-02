@@ -1,0 +1,420 @@
+---
+title: '1.Atlas PCa PDOS (Dolgos, Huang, Song, McCray): harmonization'
+author: "Romuald Parmentier"
+date: "2024-10-10"
+output: html_document
+---
+
+# Prepare environement 
+
+```{r Clone Github repo and/or point toward its direction}
+
+library(git2r)
+
+# Set the base directory where the repository should be cloned
+base_dir <- "/Users/romuald/Bioinformatics/R_Projects"
+setwd(base_dir)
+
+# Load the git2r package (install if necessary)
+if (!requireNamespace("git2r", quietly = TRUE)) {
+  install.packages("git2r")
+}
+
+# Define the repository URL and the destination directory
+repo_url <- "https://github.com/LeMagnenLab/Matrigel-free_PCa_PDOs.git"
+github_dir <- file.path(base_dir, "Matrigel_Free_Github")
+
+# Check if the repository already exists, clone if necessary
+if (dir.exists(github_dir)) {
+  message("Repository already exists at: ", github_dir)
+} else {
+  message("Cloning the repository into: ", github_dir)
+  git2r::clone(url = repo_url, local_path = github_dir)
+  message("Repository cloned successfully.")
+  message("Github repository cloned in: ", github_dir)
+}
+
+```
+
+```{r Get Zenodo file links}
+
+library("rjson")
+library("purrr")
+
+# Load and read json fron zenodo
+zenodo_json = list.files(github_dir, pattern = "json",full.names = T)
+zenodo_json = fromJSON(paste0(readLines(zenodo_json), collapse = ""))
+
+# Extract entries
+zenodo_json_files <- zenodo_json$files$entries
+
+# Convert to data.frame / tibble
+zenodo_files_df <- tibble::tibble(
+       key = names(zenodo_json_files),
+       mimetype = map_chr(zenodo_json_files, ~ .x$mimetype),
+       url = map_chr(zenodo_json_files, ~ .x$links$content),
+       size = map_dbl(zenodo_json_files, ~ .x$size)
+   )
+
+```
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  exp = "1_harmonization"
+)
+  
+
+```
+
+# Prepare the data
+
+```{r Load sample metadata}
+
+samples_metadata <- zenodo_files_df %>% 
+  filter(key == "Atlas_PCa_PDOs_metadata.csv") %>% 
+  pull(url) %>% 
+  read.csv()
+
+```
+
+```{r Load all sce annotated}
+
+# Huang 2023
+############
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "1_harmonization", 
+  pattern = "test")
+
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Huang_PDOs",
+  prev_exp = "1_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Huang_list_sce = readRDS(file_path)
+
+# McCray
+########
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "McCray_PDOs",
+  prev_exp = "2_normalization", 
+  pattern = "sce_normalized.rds")
+
+McCray_sce = readRDS(file_path)
+
+# Song_2022
+###########
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Song_PDOs",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Song_list_sce = readRDS(file_path)
+
+
+# Dolgos 2024 all PDOs
+######################
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs_All-Dolgos_Tissue_All",
+  prev_exp = "2_normalization_rescaling", 
+  pattern = "list_sce_normalized.rds")
+
+Dolgos_list_sce = readRDS(file_path)
+
+# Remove tissue sample from the list
+
+Dolgos_list_sce <- lapply(Dolgos_list_sce, function(sce) {
+  
+  # Get sample names from colData's 'Sample_Original_ID' column
+  sample_names <- unique(sce$Sample_Original_ID)
+  
+  # Check if any of the sample names contain 'PAR'
+  if (!any(grepl("PAR", sample_names))) {
+    return(sce)  # Return the SCE object if 'PAR' is not found
+  } else {
+    return(NULL)  # Return NULL if 'PAR' is found, meaning the object will be excluded
+  }
+})
+
+# Remove NULL entries (SCE objects with 'PAR' in their names)
+Dolgos_list_sce <- Dolgos_list_sce[!sapply(Dolgos_list_sce, is.null)]
+
+```
+
+```{r Harmonizing colData Huang 2023}
+
+Huang_list_sce = lapply(X = Huang_list_sce, FUN = function(sce){
+  
+  # Subsetting unwanted cells in the sce
+  untreated_cells = which(sce$Treatment == "DHT")
+  sce = sce[,untreated_cells]
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Huang_2023" & Sample_Name == unique(sce$Sample_ID))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  
+  return(sce)
+  
+})
+
+```
+
+```{r Harmonizing colData McCray}
+
+# Filter for the correct sample
+sce_metadata = samples_metadata %>%
+  filter(Dataset == "McCray_2019")
+
+# Creta the metadta df by replciating the metadata by he number of cells
+sce_metadata = sce_metadata %>%
+  slice(rep(1, ncol(McCray_sce))) 
+
+# Add cell specific sizeFacor column 
+sce_metadata$sizeFactor = McCray_sce$sizeFactor
+
+# Replace the colData by the new table
+colData(McCray_sce) = DataFrame(sce_metadata)
+
+# Store the sce in a list for convenience in later steps
+McCray_list_sce = list(McCray_sce)
+names(McCray_list_sce) = unique(McCray_sce$Sample_Original_ID)
+
+```
+
+```{r Harmonizing colData Song_2022}
+
+Song_list_sce = lapply(X = Song_list_sce, FUN = function(sce){
+
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Song_2022" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  
+  return(sce)
+  
+} )
+
+```
+
+```{r Harmonizing colData Dolgos 2024}
+
+Dolgos_Org_list_sce = Dolgos_list_sce[!grepl(x = names(Dolgos_list_sce),pattern = "PAR")]
+
+Dolgos_Org_list_sce = lapply(X = Dolgos_Org_list_sce, FUN = function(sce){
+  
+  # Filter for the correct sample
+  sce_metadata = samples_metadata %>%
+    filter(Dataset == "Dolgos_2024" & Sample_Name == unique(sce$Sample_Description))
+  
+  # Creta the metadta df by replciating the metadata by he number of cells
+  sce_metadata = sce_metadata %>%
+    slice(rep(1, ncol(sce))) 
+  
+  # Add cell specific sizeFacor column 
+  sce_metadata$sizeFactor = sce$sizeFactor
+  
+  # Replace the colData by the new table
+  colData(sce) = DataFrame(sce_metadata)
+  
+  return(sce)
+  
+})
+
+```
+
+```{r Combine all sce in a single list}
+
+# Gather all sce_comb in a single list
+list_all_sce = list(Dolgos_Org_list_sce, Huang_list_sce, Song_list_sce, McCray_list_sce)
+list_all_sce <- do.call(c, list_all_sce)
+
+```
+
+```{r Harmonizing count matrix ronames and colnames}
+
+##############################
+### rownames (= features) ###
+#############################
+
+list_all_sce = restrict_reorder_features_names(sce_list = list_all_sce)
+
+##################################
+### colnames (= cell barcodes) ###
+##################################
+
+# Check colnames of the matrix (normally done in previous steps)
+lapply(list_all_sce, function(x){head(colnames(x))})
+
+```
+
+```{r Harmonizing rowData and coldata}
+
+###############
+### RowData ###
+###############
+
+# Identify the common rowData columns across all SCE objects
+common_columns <- Reduce(intersect, lapply(list_all_sce, function(sce) colnames(rowData(sce))))
+
+# Update each SCE object to retain only the common rowData columns
+list_all_sce <- lapply(list_all_sce, function(sce) {
+  rowData(sce) <- rowData(sce)[, common_columns, drop = FALSE]  # Subset rowData
+  return(sce)  # Return updated sce
+})
+
+# Check colnames of the rowData (performed above)
+lapply(list_all_sce, function(x){colnames(rowData(x))})
+
+###############
+## ColData ###
+##############
+
+# Check colnames of the colData (normally done in previous steps)
+lapply(list_all_sce, function(x){colnames(colData(x))})
+
+
+```
+
+```{r Creating a sce_comb object with all sce}
+
+## Get total raw counts, first in a list, then combine them into a matrix
+counts_comb = lapply(list_all_sce, function(x) {counts(x)})
+counts_comb <- Reduce(function(x, y) cbind(x, y), counts_comb)
+
+## Then get total logNormed counts, first in a list, then combine them into a matrix
+logcounts_comb = lapply(list_all_sce, function(x) {logcounts(x)})
+logcounts_comb <- Reduce(function(x, y) cbind(x, y), logcounts_comb)
+
+# Combine all cell metadata (columns are already the same for each object of the list)
+colData_comb = lapply(list_all_sce, function(x) {colData(x)})
+colData_comb = Reduce(function(x, y) rbind(x, y), colData_comb)
+
+# Combine the slots to create the combined sce object
+sce_comb <- SingleCellExperiment( 
+  assays = list(counts = counts_comb, logcounts = logcounts_comb),  
+  rowData = rowData(list_all_sce[[1]]), # RowData is similar among all elements 
+  colData = colData_comb
+) 
+
+```
+
+```{r}
+
+samples_metadata_short = samples_metadata[,-c(8,12)]
+
+samples_metadata_long = pivot_longer(
+  data = samples_metadata_short,
+  cols = c(2:10), 
+  names_to = "Category",
+  values_to = "Value")
+
+colors = c(
+  pal_dataset, 
+  pal_tissue_source,
+  pal_tissue_site,
+  pal_tissue_grade,
+  pal_tissue_type,
+  pal_previous_treatment,
+  pal_org_origin,
+  pal_org_type,
+  pal_culture_condition
+  )
+
+samples_metadata_long$Category = factor(
+  x = samples_metadata_long$Category,
+  levels = rev(unique(samples_metadata_long$Category)))
+
+
+plot = ggplot(samples_metadata_long, aes(
+  x = Sample_Name,
+  y = Category,
+  fill = Value
+)) +
+  geom_tile(color = "white") + # White border for tiles
+  scale_fill_manual(values = colors) + # Apply color palette
+  theme_minimal() + # Clean theme
+  labs(
+    title = "Heatmap of Tissue Information",
+    x = "Tissue Source",
+    y = "Tissue Site",
+    fill = "Tissue Type"
+  ) +
+  theme(
+    axis.text.x = element_blank(),  # Hide the default bottom x-axis labels
+    axis.title.x = element_blank(), # Hide the default bottom x-axis title
+    axis.text.x.top = element_text(size = 8, angle = 45, hjust = 0, vjust = 0), # Top labels
+    axis.title.x.top = element_text(size = 10), # Optional: top x-axis title size
+    axis.text.y = element_text(size = 10) # Adjust y-axis text size
+  ) +
+  scale_x_discrete(position = "top") # Move x-axis labels to the top
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"geom_tile_metadta.pdf"),
+  width = 12,
+  height = 8,
+  device = "pdf")
+
+
+```
+
+
+
+```{r Export list_sce and sce_comb}
+
+###########
+# Export list_sce_comb object
+##########
+
+saveRDS(
+  object = list_all_sce,
+  file = paste0(out_path,time_stamp(),"list_all_sce_comb_harmonized.rds"))
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_all_harmonized.rds"))
+
+```
+
+

@@ -1,0 +1,436 @@
+---
+title: '8.Dolgos patient matching tissue & PDOs:: Integrin exploration'
+author: "Romuald Parmentier"
+date: "2025-01-22"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(AnnotationHub)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  exp = "8_integrin_exploration"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "4_malignancy_annotation", 
+  pattern = "sce_comb_malignancy_annotated.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Select out non epithelial cells}
+
+sce_comb = sce_comb[,-which(sce_comb$Malignancy %in% c(NA,"Non applicable","Other"))]
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+
+```
+
+# Integrins
+
+```{r Define list of genes}
+
+# Define the integrin genes
+integrin_vector <- c(
+  "ITGB1", # Central integrin
+  "ITGA1", "ITGA2", "ITGA10", "ITGA11", # Collagen binding
+  "ITGA3", "ITGA6", "ITGA7", "ITGB4", # Laminin binding
+  "ITGA9", "ITGA4", "ITGB7", "ITGB2", "ITGAL", "ITGAM", "ITGAX", "ITGAD", # Leukocyte-specific
+  "ITGAV", "ITGB5", "ITGB3", "ITGB6", "ITGB8", "ITGA5", "ITGA8" # RGD binding
+)
+
+which(integrin_vector %in% rownames(seurat_comb))
+
+```
+
+```{r Create expression data table}
+
+# Extract normalized expression data
+expression_data <- GetAssayData(seurat_comb, assay = "originalexp", layer = "data")[integrin_vector, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Add the identity group column
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("Sample_Description","Culture_Condition", "Cell_Type") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") 
+
+expression_data = expression_data %>%
+  left_join(meta_data, by = "cell") 
+
+```
+
+## Dotplot visualization
+
+```{r}
+
+# Calculate expression means and their z-scores
+dotplot_data <- expression_data %>%
+  group_by(feature, Cell_Type, Sample_Description) %>%
+  summarize(
+    avg_expression = mean(expression),  # Average expression
+    percent_expression = mean(expression > 0) * 100  # Percentage of expression
+  ) %>%
+  ungroup() %>%
+    group_by(Cell_Type, Sample_Description) %>% # Z-score calculated among
+  mutate(
+    z_score_avg_expression = (avg_expression - mean(avg_expression)) / sd(avg_expression)  # Z-score of the means
+  )
+
+# Reorganize feature order
+dotplot_data$feature = factor(dotplot_data$feature,levels = rev(integrin_vector))
+
+
+```
+
+```{r Dot plot visualisation = Fig4.a}
+
+# Create a composite variable for group and condition
+dotplot_data <- dotplot_data %>%
+  mutate(sample_cell_type = paste0(Sample_Description,"-", Cell_Type)) 
+
+dotplot_data$sample_cell_type = factor(
+  dotplot_data$sample_cell_type, 
+  levels = c(
+    "P24-06_PAR_Tum-Basal/Hillock","P24-06_Org_Mat-Basal/Hillock", "P24-06_Org_ECMf-Basal/Hillock", "P24-14_PAR_Tum-Basal/Hillock",
+    "P24-06_PAR_Tum-Club", "P24-06_Org_Mat-Club", "P24-06_Org_ECMf-Club", "P24-14_PAR_Tum-Club", "P24-14_Org_ECMf-Club",
+    "P24-06_PAR_Tum-Transitioning", "P24-06_Org_Mat-Transitioning", "P24-06_Org_ECMf-Transitioning", "P24-14_PAR_Tum-Transitioning", "P24-14_Org_ECMf-Transitioning",
+    "P24-06_PAR_Tum-Tumor", "P24-06_Org_Mat-Tumor", "P24-06_Org_ECMf-Tumor", "P24-14_PAR_Tum-Tumor", "P24-14_Org_ECMf-Tumor")
+)
+
+#####
+
+colors_vector <- c(
+  "#26456EFF", "#244C7CFF", "#21538BFF", "#1C5A99FF", "#1C63A1FF", "#1C6CAAFF", "#1F74B1FF", 
+  "#2B7BB4FF", "#3482B6FF", "#3F8BBAFF", "#4F98C4FF", "#5EA5CEFF", "#78B1D3FF",
+  "#9CBBCFFF", "#FFFFFF", "#D6BFBBFF", "#E9A79DFF", "#F78E80FF", "#F6796AFF", 
+  "#EC6857FF", "#E25644FF", "#DC4636FF", "#D73529FF", "#D21E1CFF", "#CB1618FF", 
+  "#C51517FF", "#BE1316FF", "#B3101BFF", "#A70C20FF", "#9C0824FF"
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(colors_vector)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+####
+
+plot = ggplot(dotplot_data, aes(x = sample_cell_type, y = feature)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = colors_vector,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Z-Score"
+  ) +  # Customize size scale
+  scale_size_continuous(name = "Percent Expression", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_Integrins.pdf"),
+  width = 8,
+  height = 9,
+  device = "pdf")
+
+
+```
+
+# Cell-Cell interactions
+
+```{r Define list of genes}
+
+interactions_gene_df <- data.frame(
+  gene = c(
+    "DSC3", "PKP1", "PKP3", "JUP", "DSP",
+    "ITGB4", "ITGA6", "DST", "PLEC",
+    "CLDN12", "EZR", "EPCAM", "NECTIN2", "DLG5"
+  ),
+  category = c(
+    rep("Desmosomes", 5),
+    rep("Hemidesmosomes", 4),
+    rep("Tight/Adherens Junctions", 5)
+  )
+)
+
+which(interactions_gene_df$gene %in% rownames(seurat_comb))
+
+```
+
+```{r Create expression data table}
+
+# Extract normalized expression data
+expression_data <- GetAssayData(seurat_comb, assay = "originalexp", layer = "data")[interactions_gene_df$gene, ] %>%
+  as.matrix() %>%
+  as_tibble(rownames = "feature")
+
+# Add the identity group column
+meta_data <- seurat_comb@meta.data %>% 
+  dplyr::select("Sample_Description","Culture_Condition", "Malignancy") %>% 
+  tibble::rownames_to_column("cell")
+
+expression_data <- expression_data %>% 
+  pivot_longer(cols = -feature, names_to = "cell", values_to = "expression") 
+
+expression_data = expression_data %>%
+  left_join(meta_data, by = "cell") 
+
+```
+
+## Dotplot visualization
+
+```{r Calculate z-score}
+
+# Calculate expression means and their z-scores
+dotplot_data <- expression_data %>%
+  group_by(feature, Malignancy, Sample_Description) %>%
+  summarize(
+    avg_expression = mean(expression),  # Average expression
+    percent_expression = mean(expression > 0) * 100  # Percentage of expression
+  ) %>%
+  ungroup() %>%
+    group_by(feature) %>% # Z-score calculated among
+  mutate(
+    z_score_avg_expression = (avg_expression - mean(avg_expression)) / sd(avg_expression)  # Z-score of the means
+  )
+
+
+```
+
+```{r Dot plot visualisation }
+
+# Create a composite variable for group and condition
+dotplot_data <- dotplot_data %>%
+  mutate(sample_Malignancy = paste0(Sample_Description,"-", Malignancy)) 
+
+dotplot_data$sample_Malignancy = factor(
+  dotplot_data$sample_Malignancy, 
+  levels = c(
+    "P24-06_PAR_Tum-Basal/Hillock","P24-06_Org_Mat-Basal/Hillock", "P24-06_Org_ECMf-Basal/Hillock", "P24-14_PAR_Tum-Basal/Hillock",
+    "P24-06_PAR_Tum-Club", "P24-06_Org_Mat-Club", "P24-06_Org_ECMf-Club", "P24-14_PAR_Tum-Club", "P24-14_Org_ECMf-Club",
+    "P24-06_PAR_Tum-Transitioning", "P24-06_Org_Mat-Transitioning", "P24-06_Org_ECMf-Transitioning", "P24-14_PAR_Tum-Transitioning", "P24-14_Org_ECMf-Transitioning",
+    "P24-06_PAR_Tum-Tumor", "P24-06_Org_Mat-Tumor", "P24-06_Org_ECMf-Tumor", "P24-14_PAR_Tum-Tumor", "P24-14_Org_ECMf-Tumor")
+)
+
+#####
+
+colors_vector <- c(
+  "#26456EFF", "#244C7CFF", "#21538BFF", "#1C5A99FF", "#1C63A1FF", "#1C6CAAFF", "#1F74B1FF", 
+  "#2B7BB4FF", "#3482B6FF", "#3F8BBAFF", "#4F98C4FF", "#5EA5CEFF", "#78B1D3FF",
+  "#9CBBCFFF", "#FFFFFF", "#D6BFBBFF", "#E9A79DFF", "#F78E80FF", "#F6796AFF", 
+  "#EC6857FF", "#E25644FF", "#DC4636FF", "#D73529FF", "#D21E1CFF", "#CB1618FF", 
+  "#C51517FF", "#BE1316FF", "#B3101BFF", "#A70C20FF", "#9C0824FF"
+)
+
+# Step 1: Define the number of colors and their positions
+num_colors <- length(colors_vector)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color in the vector
+
+# Step 2: Calculate breakpoints for the color scale
+max_value <- max(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+min_value <- min(dotplot_data$z_score_avg_expression, na.rm = TRUE)
+
+# Ensure white is centered at 0
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Remove duplicate 0
+)
+
+####
+
+plot = ggplot(dotplot_data, aes(x = sample_Malignancy, y = feature)) + 
+  # Draw dots with size based on percent_expression and color on avg_expression
+  geom_point(aes(fill = z_score_avg_expression, size = percent_expression), shape = 21, color = "black", stroke = 0.3) +
+  # Customize color scale
+  scale_fill_gradientn(
+    colors = colors_vector,
+    values = scales::rescale(breakpoints),  # Rescale breakpoints to 0-1
+    limits = c(min_value, max_value),       # Define the limits of the scale
+    name = "Z-Score"
+  ) +  # Customize size scale
+  scale_size_continuous(name = "Percent Expression", range = c(0, 10)) +
+  # Improve appearance of axes
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 8),
+    axis.title = element_blank()
+  ) +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete(position = "right") 
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"dotplot_Integrins.pdf"),
+  width = 8,
+  height = 9,
+  device = "pdf")
+
+
+```
+
+# Heatmap visualization
+
+```{r Randomly select xxx cells per group}
+
+# Set the seed for reproducibility of the downsampling
+set.seed(123)
+
+# Create a varaible combining the cell type and the culture condition
+sce_comb$Malignancy_Condition = paste0(sce_comb$Malignancy,"_", sce_comb$Culture_Condition)
+
+levels = c("Basal/Hillock_Tissue", "Basal/Hillock_Matrigel", "Basal/Hillock_ECMf",  "Club_Tissue","Club_Matrigel","Club_ECMf","Transitioning_Tissue","Transitioning_Matrigel", "Transitioning_ECMf", "Tumor_Tissue","Tumor_ECMf")    
+
+sce_comb$Malignancy_Condition = factor(sce_comb$Malignancy_Condition, levels = levels)
+
+sce_comb$Patient_ID = ifelse(test = grepl(pattern = "P24-14", x =  sce_comb$Sample_Description), yes = "P24-14",no = "P24-06")
+
+
+# Create a randomly selected sce woith 200 cells per walktrap cluster
+sce_comb_downsampled = downsample_sce(sce = sce_comb, group_column = "Malignancy_Condition", n_per_group = 200)
+
+# Order matrix according Malignancy and cluster
+ord <- order(sce_comb_downsampled$Malignancy_Condition, sce_comb_downsampled$Patient_ID)
+sce_comb_downsampled = sce_comb_downsampled[,ord]
+
+# Make matrix
+sce_comb_downsampled_mtx = as.matrix(logcounts(sce_comb_downsampled[interactions_gene_df$gene, ]))
+
+# Names the rows according the tested genes
+rownames(sce_comb_downsampled_mtx) = interactions_gene_df$gene
+
+# Extract scale.data
+seurat_comb_downsampled_mtx = GetAssayData(
+  object = seurat_comb,
+  assay = "originalexp", 
+  layer = "scale.data")[interactions_gene_df$gene, colnames(sce_comb_downsampled)]
+
+```
+
+```{r Make heatmap = Figure S3b}
+
+
+pal_Malignancy_Condition <- c(
+  "Basal/Hillock_Matrigel"    = "#4CD53A",  # lightened "#3CB22D"
+  "Club_Matrigel"             = "#FFD633",  # lightened "#FFCC00"
+  "Transitioning_Matrigel"    = "#FF8940",  # lightened "#FF6E00"
+  "Tumor_Matrigel"            = "#CC0026",  # lightened "#A60020"
+  
+  "Basal/Hillock_ECMf"        = "#2A7D1E",  # darkened  "#3CB22D"
+  "Club_ECMf"                 = "#CC9900",  # darkened  "#FFCC00"
+  "Transitioning_ECMf"        = "#CC5800",  # darkened  "#FF6E00"
+  "Tumor_ECMf"                = "#800016",  # darkened  "#A60020"
+  
+  "Basal/Hillock_Tissue"      = "#3CB22D",  # base green
+  "Club_Tissue"               = "#FFCC00",  # base yellow
+  "Transitioning_Tissue"      = "#FF6E00",  # base orange
+  "Tumor_Tissue"              = "#A60020"   # base red
+)
+
+
+
+heatmap_anno = HeatmapAnnotation(
+  Group = factor(sce_comb_downsampled$Malignancy_Condition, levels = levels),
+  Patient =  factor(sce_comb_downsampled$Patient_ID, levels = c("P24-06", "P24-14")),# Has to be a factor
+  col = list(
+    Group = pal_Malignancy_Condition,
+    Patient = c("P24-06" = "#FFC44CFF","P24-14" = "#00008BFF")),  
+  show_legend = c(Group = T, Patient = T), 
+  show_annotation_name = T)
+
+{
+  
+  pdf(
+    file = paste0(out_path,time_stamp(),"plot_Heatmap_Malignancy_Condition.pdf"),
+    width = 10, height = 8)
+  
+  print(Heatmap( 
+    top_annotation = heatmap_anno,
+    matrix = seurat_comb_downsampled_mtx,
+    cluster_rows = T, # Cluster cells within DE groups (Malignancy)
+    cluster_row_slices = F, # Prevents gene groups. to be clustrer among each others
+    cluster_column_slices = F, # Prevents cell groups. to be clustrer among each others
+    cluster_columns = F, # Cluster cells within cell groups (Malignancy)
+    column_split = sce_comb_downsampled$Malignancy, # Will seperate clusters
+    row_split = interactions_gene_df$category, # Will seperate clusters
+    show_column_dend = F, # If a dend has been provided in cluster_columns then it will use this one, otherwise, makes a new one.
+    show_column_names = F, # This will make cell names appear in this case (should remain F)
+    show_row_dend = F,
+    use_raster = TRUE,
+    col = circlize::colorRamp2(breaks = seq(-3, 3, length.out = length(pal_zscore)), colors = pal_zscore),
+    row_names_gp = grid::gpar(fontsize = 5),
+    row_title_rot = 0,
+    column_title_rot = 45,
+    heatmap_legend_param = list(title = "scale.data")
+  ))
+  
+  dev.off()
+  
+}
+
+
+```

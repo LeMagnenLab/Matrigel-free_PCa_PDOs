@@ -1,0 +1,531 @@
+---
+title: '3.Atlas PCa PDOS (Dolgos, Huang, Song, McCray): dimension reduction'
+author: "Romuald Parmentier"
+date: "2024-10-08"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(dplyr)
+library(scran)
+library(scater)
+library(dplyr)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  exp = "3_dimension_reduction"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load combined rescaled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "2_dataset_rescaling",
+  pattern = "sce_comb_normalized_rescaled.rds")
+
+sce_comb = readRDS(file_path)
+
+# Load list of reacled sce object after normalization and rescaling
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Atlas_PCa_PDOs",
+  prev_exp = "2_dataset_rescaling",
+  pattern = "list_sce_normalized_rescaled.rds")
+
+list_sce = readRDS(file_path)
+
+```
+
+# Select variable genes
+
+```{r variance modeling for the entire batch}
+
+list_var_model = list()
+sce_id = 1
+
+for(sce in list_sce){
+  
+  var_model = modelGeneVar(sce)
+  
+  list_var_model[[sce_id]] = var_model
+  
+  sce_id = sce_id + 1
+}
+
+combined_var_model <- combineVar(unlist(list_var_model))
+chosen.hvgs <- getTopHVGs(combined_var_model, n = 1000)
+
+```
+
+# Batch correction
+
+```{r Perform Fast MNN batch correction}
+
+fmnn.out <- suppressWarnings(batchelor::fastMNN( 
+  list_sce,
+  subset.row = chosen.hvgs, # Correction perfromed on top 1000 hvg genes only
+  k = 300, # Number of nearest neighbors (higher the smoother the correction is)
+  d = 20) )# Number of dimension to retain
+
+#  Store the MNN Values in the reducedDim slot of the combined object
+reducedDim(sce_comb, "MNN.1-20") <- reducedDim(fmnn.out)
+
+```
+
+```{r Visualize FMNN loadings}
+
+# Export fmnn loadings
+fmnn_loadings = as_tibble(rowData(fmnn.out)$"rotation")
+rownames(fmnn_loadings) = rownames(fmnn.out)
+
+# Make atiblle out of fmnn loadings
+MNN_loadings_df = as_tibble(fmnn_loadings)
+colnames(MNN_loadings_df) = paste0("MNN", 1:ncol(fmnn_loadings))
+rownames(MNN_loadings_df) = rownames(fmnn_loadings)
+
+# Reshape from wide to long format
+MNN_loadings_df_long <- MNN_loadings_df %>%
+  mutate(gene = rownames(MNN_loadings_df)) %>%
+  tidyr::pivot_longer(cols = -gene, names_to = "MNNs", values_to = "Loading")
+
+# Calculate absolute values and arrange in descending order
+top_MNN_loadings <- MNN_loadings_df_long %>%
+  mutate(abs_loadings = abs(Loading)) %>%
+  group_by(MNNs) %>%
+  arrange(desc(abs_loadings)) %>%
+  slice_head(n = 20)   
+
+###################################
+### Plot 20 first MNNS loadings ####
+###################################
+
+plot_list = list()
+MNN_id = 1
+
+MNNs = paste0("MNN", 1:20)
+
+for(MNN in MNNs){
+  
+  top_MNN_loadings_subset = top_MNN_loadings %>%
+    dplyr::filter(MNNs == MNN) %>%
+    mutate(gene = factor(gene, levels = gene[order(abs_loadings, decreasing = F)]))  # Set factor levels based on decreasing order of loadings
+  
+  # Create a bar plot for top fmnn loadings, separated by principal components
+  plot = ggplot(top_MNN_loadings_subset, aes(x = Loading , y = gene)) +  # 'gene' should be the identifier for rows/features
+    geom_col() +
+    labs(title = paste0("Top 20 loadings for MNN", MNN_id),
+         x = "Absolute Loading",
+         y = "Gene") +
+    theme_minimal() 
+  
+  plot_list[[MNN_id]] = plot
+  MNN_id = MNN_id + 1
+  
+}
+
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 3, ncol = 3)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plot_MNN_1-20_loadings.pdf"),
+  device = "pdf",
+  height = 12,
+  width = 10
+)
+
+```
+
+```{r Choosing MNNs according loadings }
+
+### Check how much the two first PCs are capturing sequencing depth (If ~1, then remove it)
+##########################################################################################
+
+MNN = reducedDim(sce_comb, "MNN.1-20")
+
+# Store depth as the sum of counts for each cell (2 = sum of rows)
+depth <- apply(counts(sce_comb), 2, sum)
+
+paste("Correlation between MNN1 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,1], depth)), digits = 2))
+
+paste("Correlation between MNN2 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,2], depth)), digits = 2))
+
+paste("Correlation between MNN3 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,3], depth)), digits = 2))
+
+paste("Correlation between MNN4 and sequenging depth with the raw data is:", 
+      round(abs(cor(MNN[,4], depth)), digits = 2))
+
+```
+
+# Uniform Manifold Approximation and Projection (UMAP) 
+
+## Perform UMAP
+
+```{r Run UMAP}
+
+sce_comb <- runUMAP(
+  sce_comb,
+  dimred = "MNN.1-20",
+  name = "UMAP_on_MNN.1-20",
+  n_neighbors = 300,
+  min_dist = 0.7)
+
+# Set default UMAP reduced dim slot
+reducedDim(sce_comb,"UMAP") = reducedDim(sce_comb,"UMAP_on_MNN.1-20")
+
+```
+
+## Visualize distribution of cells on UMAP
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Facetted UMAP colored per sample}
+
+sample_id = 1
+plot_list = list()
+
+for (sample in unique(md$Sample_Name)) {
+  
+  md_other <- subset(md, Sample_Name != sample)
+  md_sample <- subset(md, Sample_Name == sample)
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2), 
+        fill = "grey", alpha = 0.4, size = 1, color = "grey10", shape = 21),
+      dpi = 100, scale = 0.3
+    ) +
+    # Rasterise the second layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md_sample,
+        aes(x = UMAP_1, y = UMAP_2, fill = Sample_Name), 
+        alpha = 0.8, size = 2.5, color = "grey10", shape = 21),
+      dpi = 100, scale = 0.3
+    ) +
+    theme_classic() +
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  plot_list[[sample_id]] = plot
+  
+  sample_id = sample_id + 1
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 2, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Facetted_Sample.pdf"),
+  device = "pdf",
+  width = 210,
+  height = 297,
+  unit = "mm")
+
+```
+
+```{r Single UMAP colored culture condition = Fig5.A }
+
+md_ECMF <- subset(md, Organoid_Culture_Condition == "ECMf")
+md_Matrigel <- subset(md, Organoid_Culture_Condition == "Matrigel")
+
+plot =  ggplot() +
+  ggrastr::rasterise(
+    geom_point(
+      data = md_Matrigel,
+      aes(x = UMAP_1, y = UMAP_2, fill = Organoid_Culture_Condition), 
+      alpha = 0.5, size = 2, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  ggrastr::rasterise(
+    geom_point(
+      data = md_ECMF,
+      aes(x = UMAP_1, y = UMAP_2, fill = Organoid_Culture_Condition), 
+      alpha = 0.6, size = 2.5, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  scale_fill_manual(values = pal_Culture_Condition) +
+  scale_size_identity() +  # Ensures that size values are taken as is
+  scale_alpha_identity() +  # Ensures that size values are taken as is
+  theme_classic() +
+  guides(
+    alpha = "none",
+    fill = "none",
+    size = "none")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_Organoid_Culture_Condition.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8)
+
+```
+
+```{r Single UMAP colored Organoid Line Type = Fig5.A}
+
+plot <- ggplot() +
+  # Rasterise the first layer
+  ggrastr::rasterise(
+    geom_point(
+      data = md,
+      aes(x = UMAP_1, y = UMAP_2, fill = Organoid_Type), 
+      alpha = 0.6, size = 2.5, 
+      shape = 21,
+      color = "gray10"),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+    dpi = 200, scale = 0.4) +
+  scale_fill_manual(values = pal_org_type) +
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none"
+  )
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plot_UMAP_Single_Organoid_Type.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8,
+)
+
+```
+
+```{r Single UMAP colored dataset subdivded = Fig5.B}
+
+# Subdiving Dataset for Song_2022 
+md <- md %>%
+  mutate(Dataset_sub = case_when(
+    str_detect(Sample_Name, "normal_derived") ~ "Song_2022_Normal",
+    str_detect(Sample_Name, "tumor_derived") ~ "Song_2022_Tumor",
+    Dataset == "Dolgos_2024" & Organoid_Type == "Early_Passage_PDOs" & Organoid_Culture_Condition == "ECMf" ~ "Dolgos_2024_Early_ECMf",
+    Dataset == "Dolgos_2024" & Organoid_Type == "Early_Passage_PDOs" & Organoid_Culture_Condition == "Matrigel" ~ "Dolgos_2024_Early_Matrigel",
+    Dataset == "Dolgos_2024" & Organoid_Type == "Long_Term_PDOs" ~ "Dolgos_2024_Long_Term",
+    TRUE ~ Dataset  # Default case if none of the conditions match
+  ))
+
+for(dataset in unique(md$Dataset_sub)) {
+  
+  md_dataset <- subset(md, Dataset_sub == dataset)
+  md_other <- subset(md, Dataset_sub != dataset)
+  
+  plot =  ggplot() +
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2, fill = "grey10"), alpha = 0.5, size = 1, color = "grey10", shape = 21), 
+      dpi = 200, scale = 0.5) +
+    ggrastr::rasterise(
+      geom_point(
+        data = md_dataset,
+        aes(x = UMAP_1, y = UMAP_2, fill = Dataset_sub), alpha = 0.9, size = 5, color = "grey10", shape = 21), 
+      dpi = 200, scale = 0.3) +
+    scale_fill_manual(values = pal_dataset) +
+    scale_size_identity() +  # Ensures that size values are taken as is
+    scale_alpha_identity() +  # Ensures that size values are taken as is
+    theme_classic() +
+    guides(
+      alpha = "none",
+      fill = "none",
+      size = "none")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_",dataset,".pdf"),
+    device = "pdf",
+    width = 6,
+    height = 6)
+  
+  
+}
+
+```
+
+```{r Single UMAP colored Song tumor and normal}
+
+# Subdiving Dataset for Song_2022 
+md_Song = md %>%
+  dplyr::filter(Dataset == "Song_2022")
+
+  md_dataset <- subset(md, Dataset == "Song_2022")
+  md_other <- subset(md, Dataset != "Song_2022")
+  
+  plot =  ggplot() +
+    ggrastr::rasterise(
+      geom_point(
+        data = md_other,
+        aes(x = UMAP_1, y = UMAP_2, fill = "grey10"), alpha = 0.5, size = 1, color = "grey10", shape = 21), 
+      dpi = 200, scale = 0.5) +
+    ggrastr::rasterise(
+      geom_point(
+        data = md_dataset,
+        aes(x = UMAP_1, y = UMAP_2, fill = Dataset_sub), alpha = 0.9, size = 5, color = "grey10", shape = 21), 
+      dpi = 200, scale = 0.3) +
+    scale_fill_manual(values = pal_dataset) +
+    scale_size_identity() +  # Ensures that size values are taken as is
+    scale_alpha_identity() +  # Ensures that size values are taken as is
+    theme_classic() +
+    guides(
+      alpha = "none",
+      fill = "none",
+      size = "none")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_Song_Normal-Tumor.pdf"),
+    device = "pdf",
+    width = 6,
+    height = 6)
+  
+
+
+```
+
+```{r Single UMAP colored tissue grade}
+
+md$Tissue_Grade = ifelse(test = md$Tissue_Grade == "Not_Applicable",yes = "Metastasis",no = md$Tissue_Grade)
+
+md_not_available <- subset(md, Tissue_Grade == "Not_Available")
+md_rest <- subset(md, Tissue_Grade != "Not_Available")
+
+plot =  ggplot() +  
+  ggrastr::rasterise(
+    geom_point(
+      data = md_not_available,
+      aes(x = UMAP_1, y = UMAP_2, fill = Organoid_Culture_Condition), 
+      alpha = 0.5, size = 2, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  ggrastr::rasterise(
+    geom_point(
+      data = md_rest,
+      aes(x = UMAP_1, y = UMAP_2, fill = Tissue_Grade), 
+      alpha = 0.5, size = 2, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  # scale_fill_manual(values = rev(paletteer_c("viridis::magma", length(unique(md$Tissue_Grade))))) +
+  scale_fill_manual(values = pal_tissue_grade) +
+  scale_size_identity() +  # Ensures that size values are taken as is
+  scale_alpha_identity() +  # Ensures that size values are taken as is
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_Tissue_Grade.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8)
+
+```
+
+```{r Single UMAP colored tissue source}
+
+md_not_available <- subset(md, Tissue_Source == "Not_Available")
+md_rest <- subset(md, Tissue_Source != "Not_Available")
+
+plot =  ggplot() +  
+  ggrastr::rasterise(
+    geom_point(
+      data = md_not_available,
+      aes(x = UMAP_1, y = UMAP_2, fill = Tissue_Source), 
+      alpha = 0.5, size = 2, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  ggrastr::rasterise(
+    geom_point(
+      data = md_rest,
+      aes(x = UMAP_1, y = UMAP_2, fill = Tissue_Source), 
+      alpha = 0.5, size = 2, color = "grey10", shape = 21), 
+    dpi = 200, scale = 0.4) +
+  # scale_fill_manual(values = rev(paletteer_c("viridis::magma", length(unique(md$Tissue_Grade))))) +
+  scale_fill_manual(values = pal_tissue_source) +
+  scale_size_identity() +  # Ensures that size values are taken as is
+  scale_alpha_identity() +  # Ensures that size values are taken as is
+  theme_classic() +
+  guides(
+    fill = "none",
+    alpha = "none",
+    size = "none")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_UMAP_Single_Tissue_Source.pdf"),
+  device = "pdf",
+  width = 8,
+  height = 8)
+
+```
+
+```{r Quick gene expression visualization}
+
+# Feaature plots
+plotUMAP(object = sce_comb,colour_by = "KRT5")
+plotUMAP(object = sce_comb,colour_by = "KRT19")
+plotUMAP(object = sce_comb,colour_by = "KLK3")
+plotUMAP(object = sce_comb,colour_by = "AMACR")
+
+
+# Violin plot
+plotExpression(
+  sce_comb, 
+  features = c("KRT5", "KRT19", "PIGR","LTF","AMACR","KLK3"),
+  x = "Sample_Name", # Split by SampleDescription
+  colour_by = "Sample_Name",  # Color points by SampleDescription
+  show_smooth = TRUE) + 
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)
+  )
+
+```
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_dim_reduced.rds"))
+
+```

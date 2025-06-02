@@ -1,0 +1,152 @@
+---
+title: "7.Dolgos patient matching tissue & PDOs: infer_cnv results visualization"
+author: "Romuald Parmentier"
+date: "2024-10-31"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(SingleCellExperiment)
+library(UCell)
+library(dplyr)
+library(ggplot2)
+library(ggbeeswarm)
+library(ggpubr)
+library(grid)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  exp = "7_infer_cnv_visualization"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# sce_comb object after dimension reduction 
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "5_signature_score",
+  pattern = "sce_comb_malignancy_annotated.rds") 
+
+sce_comb = readRDS(file_path)
+
+# Infer CNV score alculated on the sce_comb input
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_PDOs-Dolgos_Tissue_Matching",
+  prev_exp = "6_infer_cnv",
+  pattern = "High_CNV_scores_per_cell_10pct")
+
+scores = readRDS(file_path)
+
+```
+
+```{r Add infer_cnv scores to the sce object}
+
+sce_comb = sce_comb[, colnames(sce_comb) %in% names(scores)]
+sce_comb$infercnv_score = scores[colnames(sce_comb)]
+
+```
+
+# Visualization
+
+```{r Extract metadata and store them in a df, warning=FALSE}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+# Split between the two patient
+md$patient_id = ifelse(
+  test =  grepl(x = md$Sample_Description, pattern = "P24-06"),
+  yes = "P24-06",
+  no = "P24-14")
+
+# Split between the two patient
+md$Organoid_Type_Condition = paste0(md$Organoid_Type,"_", md$Culture_Condition)
+
+```
+
+
+## Density plots (comparing inferCNV score between malignancy)
+
+```{r Density plot with samples merged and colored by malignancy = Fig5.C}
+
+# Density plot all samples merged
+plot = ggplot(data = md, aes(infercnv_score, fill = Sample_Description)) + 
+  theme_minimal() +
+  xlim(c(0,0.5)) +
+  ylim(c(0,12.5)) +
+  geom_density(colour = "black", alpha = 0.7) +
+  facet_wrap(~patient_id)
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_density_Infer_CNV_Malignancy_Merged.pdf"),
+  device = "pdf",
+  width = 10,
+  height = 6)
+
+```
+
+
+# Box plots (comparing inferCNV score between malignancy)
+
+```{r Box plot of infer_cnv scores for each CLM sample separately = Fig5.D}
+
+# Remove Na and keep only epithelial cells
+md_epi = md %>% 
+  filter(!is.na(Malignancy_Type)) %>%
+  filter(broad_type == "Epithelial cells") %>%
+  group_by(Sample_Description,Malignancy_Type) %>%
+  filter(n() > 20)
+
+plot = ggplot(md_epi, aes(y = infercnv_score, x = Malignancy_Type, fill = Organoid_Type_Condition)) +
+  geom_boxplot(lwd = 0.5, width = 0.5, outlier.shape = NA) +
+  ylim(c(0, 0.5)) +
+  labs(title = "CNV_score in early-passaged PDOs (Matrigel/ECMf) cells vs matchimg tumor tissue cells lines",
+       x = NULL,
+       y = "Infer_CNV_scores") +
+  scale_fill_manual(values = pal_Culture_Condition) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), # Tilt x-axis annotations
+        plot.title = element_text(size = 8)) +
+  facet_grid(~patient_id)
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_BoxPlots_SampleDescription_Malignancy_Merged.pdf"),
+    device = "pdf",
+    width = 12,
+    height = 6)
+
+```
+
+# Export files 
+
+```{r Export RDS files}
+
+# Export dimension reduced sce_comb object
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_infer_cnv_scored.rds"))
+
+```

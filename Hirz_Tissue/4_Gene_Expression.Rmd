@@ -1,0 +1,810 @@
+---
+title: 'Hirz 2022: Gene Expression Visualization'
+author: "Romuald Parmentier"
+date: "2023-08-04"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+#Libraries
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(ggbeeswarm)
+library(gridExtra)
+library(scater)
+library(org.Hs.eg.db)
+library(ComplexHeatmap)
+
+# Functions and palettes
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Functions.R")
+source(file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/my_R_functions/Medium_Optimization_Custom_Color_Palettes.R")
+
+# Create output path
+out_path = create_exp_folder(
+  project = "Medium_Optimization",
+  organ = "Prostate",
+  samples_ID = "Hirz_2022",
+  exp = "gene_expression"
+)
+
+```
+
+# Prepare the data
+
+```{r Load sce object after dimension reduction and restrcit it to groups of interest}
+
+file_path = get_exp_file_path(
+  organ = "Prostate",
+  project = "Medium_Optimization",
+  samples_ID = "Hirz_2022",
+  prev_exp = "dimension_reduction",
+  pattern = "sce_comb_dim_reduced.rds")
+
+sce_comb = readRDS(file = file_path) 
+
+# Restrict the sce object to the cell types of interests
+sce_comb_focus = sce_comb[ , which(sce_comb$cell_type_broad %in% c("Epithelial_Basal","Epithelial_Luminal", "Epithelial_Tumor"))]
+
+```
+
+```{r Load gene sets to be tested and create a folder per gene set}
+
+# Load gene sets
+gene_sets_table = read.csv(
+  file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/Medium_Optimization_Gene_sets_table.csv",
+  header = T)
+
+# Make a list and name the elements
+gene_set_list = gene_sets_table %>% 
+  filter(Gene_set_name %in% c("Basal", "Luminal", "AR_Repressed", "IRE1_repressed","IRE1_induced","TFs_Down_in_KO","TFs_Up_in_KO")) %>%
+  group_by(Gene_set_name) %>% group_split()
+
+names(gene_set_list) = unlist(lapply(gene_set_list, function(x){unique(x$Gene_set_name)}))
+
+# Create dedicated output folder per gene set
+name_list = list()
+symbol_list = list()
+out_path_list = list()
+
+for (i in 1:length(gene_set_list)){
+  
+  gene_set = gene_set_list[[i]]
+  
+  name_list[[i]] = names(gene_set_list)[[i]]
+  symbol_list[[i]] = gene_set$Genes
+  names(symbol_list)[i] = name_list[[i]]
+  
+  out_path_set = create_exp_folder(
+    organ = "Prostate",
+    project = "Medium_Optimization",
+    samples_ID = "Hirz_2022",
+    exp = paste0("gene_expression/Gene_Sets/", names(gene_set_list)[[i]]))
+  
+  out_path_list[[i]] = out_path_set
+
+}
+
+```
+
+# Visualisation
+
+## Number of gene and UMI per cell
+
+```{r Add QC per cell and metadata}
+
+# Add QC metrics per cells
+sce_comb_focus = addPerCellQCMetrics(x = sce_comb_focus)
+
+# Export metadata as data.frame
+md = as_tibble(colData(sce_comb_focus))
+md = md %>% mutate(sum_log10 = log10(sum))
+
+```
+
+```{r Violin plots number of gene per cell}
+
+plot = ggplot(md, aes(x = cell_type_broad, y = detected))+
+  # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+  geom_violin(alpha = 0.8, aes(fill = cell_type_broad)) +
+  geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5)+
+  scale_fill_manual(values = pal_Hirz_broad_cell_type, name = "cell_type_broad") + 
+  guides(fill = "none") +
+  labs(title = "Number of genes per cell detected ") +
+  theme(
+    plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+  labs(x = "", y = " Count ")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Violins_Nb_Gene_Epithelial_Cells.pdf"),
+  device = "pdf",
+  units = "mm",
+  width = 210,
+  height = 150
+)
+
+
+# Stratified by Grade
+#####################
+
+plot = ggplot(md, aes(x = cell_type_broad, y = detected)) +
+  # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+  geom_violin(aes(fill = Grade), alpha = 0.8, ) +
+  geom_boxplot(aes(fill = Grade), width = 0.1, position = position_dodge(width = 0.9), alpha = 0.5)+
+  scale_fill_manual(values = c("#8CB2FF", "#FF9900")) + 
+  labs(title = "Number of genes per cell detected ") +
+  theme(
+    plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+  labs(x = "", y = " Count ")
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Violins_Nb_Gene_Per_Epithelial_Cells_Per_Grade.pdf"),
+  device = "pdf",
+  units = "mm",
+  width = 210,
+  height = 150
+)
+```
+
+```{r Violin plots number of UMI per. cell}
+
+plot = ggplot(md, aes(x = cell_type_broad, y = log10(sum)))+
+  # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+  geom_violin(alpha = 0.8, aes(fill = cell_type_broad)) +
+  geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5)+
+  scale_fill_manual(values = pal_Hirz_broad_cell_type, name = "cell_type_broad") + 
+  guides(fill = "none") +
+  labs(title = "Number of transcript per cell detected") +
+  theme(
+    plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+  labs(x = "", y = "log(10)_UMI")
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Nb_UMI_Per_Epithelial_Cells.pdf"),
+  device = "pdf",
+  units = "mm",
+  width = 210,
+  height = 150
+)
+
+################
+### Gene per Grade
+################
+
+plot = ggplot(md, aes(x = cell_type_broad, y = log10(sum))) +
+  # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+  geom_violin(aes(fill = Grade), alpha = 0.8, ) +
+  geom_boxplot(aes(fill = Grade), width = 0.1, position = position_dodge(width = 0.9), alpha = 0.5)+
+  scale_fill_manual(values = c("#8CB2FF", "#FF9900")) + 
+  labs(title = "Number of transcript per cell detected ") +
+  theme(
+    plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+  labs(x = "", y = "log(10)_UMI")
+
+
+ggsave(
+  plot = plot,
+  filename = paste0(out_path,time_stamp(),"plots_Nb_UMI_Per_Epithelial_Cells_Per_Grade.pdf"),
+  device = "pdf",
+  units = "mm",
+  width = 210,
+  height = 150
+)
+
+```
+
+## Proportion and number of positive cell per gene
+
+```{r Format the gene expression table for ggplot, message=F, warning=FALSE}
+
+gene_expr_long_list = list()
+gene_expr_long_list_grouped = list()
+symbol_list_ordered = list()
+
+for (i in 1:length(gene_set_list)) {
+  
+  # Check presence of genes and check for aliase if not present
+  print(paste0("Checking aliases for: ", names(gene_set_list)[[i]], " ongoing..."))
+  symbol_list[[i]] = sapply(X = symbol_list[[i]], FUN = function(x){check_aliase(sce = sce_comb_focus,x)})
+  
+  # Testing if genes are missing in the dataset, if still missing then remove it from the gene set
+  missing_genes = setdiff(x = symbol_list[[i]], y = rownames(sce_comb_focus))
+  if (length(missing_genes) != 0) {symbol_list[[i]] = symbol_list[[i]][-which(symbol_list[[i]] %in% missing_genes)]} else{}
+  
+  # Extracting logcounts from count matrix
+  gene_expr <- as_tibble(as.matrix(logcounts(sce_comb_focus))[symbol_list[[i]], ])
+  gene_expr$Gene = symbol_list[[i]]
+  
+  print(paste0("Making gene expression long table for: ", names(gene_set_list)[[i]], " ongoing..."))
+  
+  # Pivot longer to have a ggplo compatible table
+  gene_expr_long = pivot_longer(data = gene_expr, cols = -Gene, names_to ="Cell", values_to = "Expression")
+  
+  # Adding any valuable metadata column (repeat as many times as the number of genes extracted)
+  gene_expr_long[["cell_type_broad"]]= rep(sce_comb_focus[["cell_type_broad"]], length(symbol_list[[i]]))
+  
+  # Calculate mean value of expression per gene and sort it ascending for better visualisation on the heatmap
+  gene_expr_long_summarized = gene_expr_long %>% group_by(Gene) %>% summarise(mean = mean(Expression)) %>% arrange(desc(mean))
+  
+  # Convert Gene column into a factor and sort it according mean value of expression
+  gene_expr_long$Gene = factor(gene_expr_long$Gene, levels =  gene_expr_long_summarized$Gene)
+  gene_expr_long$Grade = ifelse(grepl("LG", gene_expr_long$Cell), "Low Grade", "High Grade")
+  
+  # Reorder levels of grades
+  gene_expr_long$Grade = factor(gene_expr_long$Grade, levels = c("Low Grade", "High Grade"))
+  
+  print(paste0("Making gene expression long table for: ", names(gene_set_list)[[i]], " done."))
+  
+  print(paste0("Summarizing gene expression long table: ", names(gene_set_list)[[i]], " ongoing..."))
+  
+  # Summarized values grouped by cell type and Grade
+  gene_expr_long_summarized_grouped = gene_expr_long %>% 
+    group_by(Gene, cell_type_broad, Grade) %>% 
+    summarize(
+      count_greater_than_zero = sum(Expression > 0),
+      count_equal_to_zero = sum(Expression == 0),
+      mean = mean(Expression)) %>%
+    mutate(Positive_proportion = round(count_greater_than_zero / (count_greater_than_zero + count_equal_to_zero),2)*100) 
+  
+  print(paste0("Summarizing gene expression long table: ", names(gene_set_list)[[i]], " done."))
+  
+  # Gene set sorted with descending order of mean expression
+  symbol_list_ordered[[i]] = levels(gene_expr_long$Gene)
+  gene_expr_long_list[[i]] = gene_expr_long
+  gene_expr_long_list_grouped[[i]] = gene_expr_long_summarized_grouped
+  
+}
+
+```
+
+### Separated by cell types 
+
+```{r Compute proportion of positive cells for each gene in each cell type, message=F}
+
+positive_cells_count_list = list()
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("Computing positive cells per gene per cell type for", names(gene_set_list)[[i]]))
+  
+  positive_cells_count <-  gene_expr_long_list[[i]] %>%
+    group_by(Gene, cell_type_broad) %>%
+    summarize(count_greater_than_zero = sum(Expression > 0),
+              count_equal_to_zero = sum(Expression == 0),
+              mean_expression = mean(Expression)) %>%
+    mutate(Positive_proportion = round(count_greater_than_zero / (count_greater_than_zero + count_equal_to_zero),2)*100)
+  
+  write.csv(x = positive_cells_count,file = paste0(out_path_list[[i]],time_stamp(),name_list[[i]],"_POS_cells_counts.csv"))
+  
+  positive_cells_count_list[[i]] = positive_cells_count
+  names(positive_cells_count_list)[[i]] = names(gene_set_list)[[i]]
+  
+}
+
+```
+
+```{r Plot proportion of positive cells for each gene in each each cell type, message=F}
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("plotting % of positive cells per gene per cell type for", names(gene_set_list)[[i]]))
+  
+  plot_list <- list()
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = positive_cells_count_list[[i]] %>% dplyr::filter(Gene == gene)
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = cell_type_broad, y = Positive_proportion)) +
+      geom_point(
+        aes(size = count_greater_than_zero, fill = mean_expression), 
+        colour = "black", shape=21, stroke = 0.5,
+        position = position_dodge(width = 0.5)) +
+      scale_size(
+        range = c(2,9),limits = c(0,2000)) +  # Adjust the range as needed
+      scale_fill_gradientn(
+        colours =  paletteer_c("viridis::inferno", 30),
+        limits = c(0, max(data$mean_expression))) +
+      ylim(c(0,100) )+
+      facet_wrap(~ Gene, scales = "free_y") + 
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(x = "", y = "Proportion of positive cells", 
+           fill = "Average log2(UMI)",
+           siez = "Number of positive cells")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"Dotplot_", name_list[[i]], "_Proportion_Positive_Epithelial_Cells.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+```
+
+### Separated by cell types and grade
+
+```{r Compute proportion of positive cells for each gene in each cell type separated by grad, message=F}
+
+positive_cells_count_grades_list = list()
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("Computing positive cells per gene per cell type per grade for", names(gene_set_list)[[i]]))
+  
+  positive_cells_count <-  gene_expr_long_list[[i]] %>%
+    group_by(Gene, cell_type_broad, Grade) %>%
+    summarize(count_greater_than_zero = sum(Expression > 0),
+              count_equal_to_zero = sum(Expression == 0),
+              mean_expression = mean(Expression)) %>%
+    mutate(Positive_proportion = round(count_greater_than_zero / (count_greater_than_zero + count_equal_to_zero),2)*100)
+  
+  write.csv(x = positive_cells_count,file = paste0(out_path_list[[i]],time_stamp(),name_list[[i]],"_POS_cells_counts_By_Grade.csv"))
+  
+  positive_cells_count_grades_list[[i]] = positive_cells_count
+  names(positive_cells_count_grades_list)[[i]] = names(gene_set_list)[[i]]
+  
+}
+
+```
+
+```{r Plot proportion of positive cells for each gene in each each cell type separated per grade, message=F}
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("plotting % of positive cells per gene per cell type per grade for", names(gene_set_list)[[i]]))
+  
+  plot_list <- list()
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = positive_cells_count_grades_list[[i]] %>% dplyr::filter(Gene == gene)
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = cell_type_broad, y = Positive_proportion)) +
+      geom_point(
+        aes(size = count_greater_than_zero, shape = Grade, fill = mean_expression), 
+        stroke = 1,
+        position = position_dodge(width = 0.5)) +
+      scale_size(range = c(2,9),limits = c(0,2750)) + # Adjust the range as needed
+      scale_shape_manual(values = c(21,24))+
+      scale_fill_gradientn(
+        colours =  paletteer_c("viridis::inferno", 30),
+        limits = c(0, max(data$mean_expression))) +
+      ylim(c(0,100))+
+      facet_wrap(~ Gene, scales = "free_y") + 
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(
+        x = "", 
+        y = "Proportion of positive cells",
+        fill = "Average log2(UMI)")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"Dotplot_", name_list[[i]], "_Proportion_Positive_Epithelial_Cells_Per_Grade.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+
+```
+
+## Gene expression intensity visualisation with violin plots
+
+```{r Single violin plots with their own scale}
+
+#############
+### All cells
+#############
+
+for (i in 1:length(gene_set_list)) {
+  
+  plot_list <- list()
+  
+  print(paste("plotting single violin per gene per cell type (ALL cells)  for", names(gene_set_list)[[i]]))
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = gene_expr_long_list[[i]] %>% dplyr::filter(Gene == gene)
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = !!as.name(cell_type_broad), y = Expression)) +
+      # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+      geom_violin(alpha = 0.8, aes(fill = .data[[cell_type_broad]])) +
+      geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+      facet_wrap(~ Gene, scales = "free_y") + #
+      scale_fill_manual(values = pal.cell.broad.hirz, name = cell_type_broad) + 
+      guides(fill = "none") +
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(x = "", y = "log2(UMI_count)")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"plots_Each_Violin_GenExp_", cell_type_broad,"_", name_list[[i]], "_ALL_Cells.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+#######################################
+### ALL cells separated by grade #####
+######################################
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("plotting single violin per gene per cell type per grade (ALL cells) for", names(gene_set_list)[[i]]))
+  
+  plot_list <- list()
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = gene_expr_long_list[[i]] %>% dplyr::filter(Gene %in% gene)
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = !!as.name(cell_type_broad), y = Expression)) +
+      # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+      geom_violin(aes(fill = Grade), 
+                  alpha = 0.8, position = position_dodge(width = 0.8)) +
+      scale_fill_manual(values = c("#8CB2FF", "#FF9900")) + 
+      geom_boxplot(aes(fill = Grade),
+                   width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+      facet_wrap(~ Gene, scales = "free_y") + 
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(x = "", y = "log2(UMI_count)")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),
+                      "plots_Each_Violin_GenExp_",
+                      cell_type_broad,"_", name_list[[i]], 
+                      "_ALL_Cells_Grade_Separated.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+
+#############################
+### Only positive cells #####
+#############################
+
+
+for (i in 1:length(gene_set_list)) {
+  
+  plot_list <- list()
+  
+  print(paste("plotting single violin per gene per cell type (POS cells only) for", names(gene_set_list)[[i]]))
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = gene_expr_long_list[[i]] %>% 
+      dplyr::filter(Gene == gene, Expression != 0) # This is where only pos cells are selected
+    
+    if(nrow(data) ==0){next}
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = !!as.name(cell_type_broad), y = Expression)) +
+      # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+      geom_violin(alpha = 0.8, aes(fill = .data[[cell_type_broad]])) +
+      geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+      facet_wrap(~ Gene, scales = "free_y") + #
+      scale_fill_manual(values = pal.cell.broad.hirz, name = cell_type_broad) + 
+      guides(fill = "none") +
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(x = "", y = "log2(UMI_count)")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"plots_Each_Violin_GenExp_", cell_type_broad,"_", name_list[[i]], "Only_POS_Cells.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+################################################
+### Only positive cells separated by grade #####
+################################################
+
+for (i in 1:length(gene_set_list)) {
+  
+  print(paste("plotting single violin per gene per cell type per grade (POS cells only) for", names(gene_set_list)[[i]]))
+  
+  
+  plot_list <- list()
+  
+  for(gene in symbol_list_ordered[[i]]){
+    
+    data = gene_expr_long_list[[i]] %>% 
+      dplyr::filter(Gene == gene, Expression != 0)
+    
+    if(nrow(data) ==0){next}
+    
+    plot_list[[gene]] =  ggplot(data, aes(x = !!as.name(cell_type_broad), y = Expression)) +
+      # geom_quasirandom(size = 0.3, color = "black", alpha = 0.5) + # Allows to fill Violin plot with dots in a qusi random way
+      geom_violin(aes(fill = Grade), 
+                  alpha = 0.8, position = position_dodge(width = 0.8)) +
+      scale_fill_manual(values = c("#8CB2FF", "#FF9900")) + 
+      geom_boxplot(aes(fill = Grade),
+                   width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+      facet_wrap(~ Gene, scales = "free_y") + 
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) +
+      labs(x = "", y = "log2(UMI_count)")
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),
+                      "plots_Each_Violin_GenExp_",
+                      cell_type_broad,"_", name_list[[i]], 
+                      "_POS_Cells_Grade_Separated.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+
+
+```
+
+```{r Multiple violin plots with common scale}
+
+for (i in 1:length(gene_set_list)) {
+  
+  plot_list <- list()
+  
+  # Cut the custom_panel into pieces of 6 genes + xx genes remaining
+  only_6_genes <- split(symbol_list_ordered[[i]], ceiling(seq_along(symbol_list_ordered[[i]])/6))
+  
+  for(list in 1:length(only_6_genes)){
+    
+    data = gene_expr_long_list[[i]] %>% dplyr::filter(Gene %in% only_6_genes[[list]])
+    
+    plot_list[[list]]<- ggplot(data, aes(x = Gene, y = Expression, fill = .data[[cell_type_broad]])) +
+      geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+      geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+      scale_fill_manual(values = palette, name = cell_type_broad) +
+      ylim(c(0,max(round(gene_expr_long_list[[i]]$Expression,0)))) +
+      theme(
+        plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm"),
+        axis.text.x = element_text(angle = 45, hjust = 1,size = 8)) 
+  }
+  
+  
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"plots_All_Violin_GenExp_", 
+                      cell_type_broad,"_", name_list[[i]], 
+                      "Only_Pos_Cells.pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+```
+
+## Heatmap
+
+```{r Heatmaps for list of panels}
+
+cell_type_broad = "cell_type_broad"
+
+for (i in 1:length(gene_set_list)) {
+  
+  row.fontsize <- ifelse(length(symbol_list[[i]]) >= 150, 4,
+                         ifelse(length(symbol_list[[i]]) >= 100, 5, 
+                                ifelse(length(symbol_list[[i]]) >= 50, 6,
+                                       7)))
+  
+  plot_list <- list()
+  
+  
+  # Randomly downsample each group to the minimum number of rows
+  
+  sampling_value = min(table(sce_comb_focus$cell_type_broad)) 
+  
+  downsampled_metadata <- as.data.frame(colData(sce_comb_focus)) %>%
+    mutate(row_index =  row_number()) %>%
+    group_by(.data[[cell_type_broad]]) %>%
+    sample_n(size = sampling_value, replace = FALSE)
+  
+  sce_comb_down = sce_comb_focus[,downsampled_metadata$row_index]
+  sce_comb_down_logcounts = as.matrix(logcounts(sce_comb_down[symbol_list_ordered[[i]],]))
+  rownames(sce_comb_down_logcounts) = symbol_list_ordered[[i]]
+  
+  ha = HeatmapAnnotation(
+    cell_type_broad = as.factor(sce_comb_down[[cell_type_broad]]), 
+    col = list(cell_type_broad = pal.cell.broad.hirz),
+    show_legend = F)
+  
+  pdf(
+    file = paste0(out_path_list[[i]], time_stamp(),"plot_Heatmap_", cell_type_broad, "_", name_list[[i]], ".pdf"),
+    width = 10,height = 8)
+  
+  print(Heatmap(
+    matrix = sce_comb_down_logcounts,
+    cluster_rows = T,
+    cluster_columns = F,
+    show_column_names = F, 
+    show_row_dend = F,
+    col = c("grey", rev(paletteer_c("viridis::inferno", 30))),
+    top_annotation = ha,
+    column_split = rep(unique(sce_comb_down[[cell_type_broad]]), each = sampling_value),
+    heatmap_legend_param = list(title = "log2(UMI_count)"),
+    row_names_gp = grid::gpar(fontsize = row.fontsize),
+    column_title_rot = 45
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+## UMAP plots for panel 
+
+```{r Non corrected values}
+
+# get metadata
+md <- as.data.frame(colData(sce_comb))
+
+# get embeddings
+coords <- as.data.frame(reducedDim(sce_comb, type = chosen_dim))
+
+colnames(coords) = c("UMAP_1", "UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+md = md %>%
+  mutate(cell_idx = row_number())
+
+
+# Randomly downsample each group to the minimum number of rows
+
+md_down <- md %>%
+  group_by(cell_type) %>%
+  mutate(group_size = n()) %>%
+  mutate(sample_size = ifelse(group_size < 500, group_size, 500)) %>%
+  ungroup() %>%
+  group_split(cell_type) %>%
+  purrr::map(function(group) {
+    sample_rows <- sample.int(nrow(group), size = min(group$sample_size), replace = FALSE)
+    group[sample_rows, ]
+  }) %>%
+  bind_rows() %>%
+  dplyr::select(-group_size, -sample_size)
+
+sce_comb_down = sce_comb[,md_down$cell_idx]
+
+```
+
+```{r UMAP plots with custom panel genes, message = FALSE}
+
+# Extract UMAP_1 and UMAP_2 coordinates
+umap_coord <- as_tibble(reducedDims(sce_comb_down)[[chosen_dim]])
+colnames(umap_coord) = c("UMAP_1", "UMAP_2")
+
+for (i in 1:length(gene_set_list)) {
+  
+  plot_list <- list()
+  
+  # Create a umap plot for each gene in the panel 
+  # Stores it in a list
+  
+  for (gene in symbol_list[[i]]) {
+    
+    gene = check_aliase(sce = sce_comb_down, gene = gene)
+    
+    if(gene %in% rownames(sce_comb_down)){
+      
+      # Add expression values for selected gene
+      gene_expr <- logcounts(sce_comb_down)[gene, ]
+      data <- cbind(umap_coord, gene_expr)
+      
+      print(gene)
+      
+      plot <- ggplot(data, aes(x = UMAP_1, y = UMAP_2, color = gene_expr)) +
+        geom_point(size = 2, alpha = 0.6) +
+        scale_color_gradientn(colours = pal.genexp.magma, name = "UMI count \n (log2 & scaled)") +
+        ggtitle(label = gene) +
+        theme_void() +
+        theme(
+          plot.title = element_text(size = 20),
+          plot.margin = margin(t = 1, b = 1, r = 1, l = 1, "cm") # Padding arround the plot 
+        )
+      
+      plot_list[[gene]] = plot
+      
+    }
+    
+    else{ print(paste(gene, " and aliases not found in the dataset. Skip it.")) }
+    
+  }
+  
+  # Multi-page layout 
+  multiple_page_layout <- marrangeGrob(plot_list, nrow = 2, ncol = 1)
+  
+  ggsave(
+    plot = multiple_page_layout,
+    filename = paste0(out_path_list[[i]],time_stamp(),"plots_UMAP_GenExp_", name_list[[i]], ".pdf"),
+    device = "pdf",
+    units = "mm",
+    width = 210,
+    height = 297
+  )
+  
+}
+
+```

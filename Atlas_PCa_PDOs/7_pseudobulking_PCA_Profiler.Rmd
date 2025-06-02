@@ -1,0 +1,315 @@
+---
+title: "7.Atlas PCa PDOS (Dolgos, Huang, Song, McCray): pseudobulking "
+author: "Romuald Parmentier"
+date: "2024-12-13"
+output: html_document
+---
+
+
+```{r Load libraries and create output folder, message = F}
+
+library(SingleCellExperiment)
+library(muscat)
+library(dplyr)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(biomaRt)
+library(ggplot2)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_2024_All",
+  exp = "7_pseudobulking_PCA_profiler"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+# sce_comb object after dimension reduction 
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_2024_All",
+  prev_exp = "3_dimension_reduction",
+  pattern = "sce_comb_dim_reduced")
+
+sce_comb = readRDS(file_path)
+
+# Load Dolgos_early passage sce object after clustering and Cell_Type assignation
+
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Dolgos_2024_Early_Passage",
+  prev_exp = "4_clustering", 
+  pattern = "sce_comb_clustered.rds")
+
+print(file_path)
+
+sce_comb_ref = readRDS(file = file_path)
+
+```
+
+
+```{r Load the files}
+
+#  Assign Cell_Type to Dolgos_early_passage cells according to the Cell_Type already given beforehand
+indices = which(colnames(sce_comb) %in% colnames(sce_comb_ref))
+sce_comb$Cell_Type[indices] = sce_comb_ref$Malignancy
+
+# Assign Cell_Type = tumor for stable lines MSK, P20-11, P20-23
+sce_comb$Cell_Type = ifelse(
+  test = grepl(x = sce_comb$Sample_Description, pattern = "P20-11|P20-23|MSK"),
+  yes = "Tumor",
+  no = sce_comb$Cell_Type
+)
+
+```
+
+```{r}
+
+genes <- read_csv("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/PDOX_vs_PDOXO/exp/All_P20-11_P20-23_MSK/pseudobulking/PCA_Profiler_genes.csv", col_names = F)
+genes$X1 = stringr::str_replace(genes$X1, "\\..*$", "")
+colnames(genes) = "ENSEMBL"
+
+```
+
+
+```{r Computing psudobulk sum of raw reads accross cells within samples}
+
+sce_comb$Sample_Cell_Type = paste(sce_comb$Sample_Description , sce_comb$Cell_Type, sep = "_")
+
+# Pseudobulk counts
+pseudobulked_sce_comb <- aggregateAcrossCells(sce_comb, ids = sce_comb$Sample_Cell_Type)
+
+# Inspect the result
+pseudobulk_counts_table = assay(pseudobulked_sce_comb, "counts")
+pseudobulk_counts_table <- apply(pseudobulk_counts_table, c(1, 2), function(x) round(x, digits = 0))
+pseudobulk_counts_table = as_tibble(pseudobulk_counts_table)
+pseudobulk_counts_table = pseudobulk_counts_table %>%
+  mutate(gene = rowData(pseudobulked_sce_comb)$ENSEMBL) %>%
+  relocate(gene)
+
+# Export the table
+write.csv(
+  x = pseudobulk_counts_table,
+  file = paste0(out_path, time_stamp(), "table_PseudoBulked_counts_sample_cell_type.csv"),
+  row.names = F
+)
+
+
+```
+
+Once the pseudobulked count sum has been created :
+
+- Go to https://prostatecanceratlas.org/app/profiler 
+- Bulk RNA > Overview > Add 
+- Samples will be update with a high number of "missing genes" ~75%. But don't worry
+=> this actually refers to their own set of genes (see PCA_profiler_genes.csv file in the forlder or download it in ressources >> dowloads)
+- Once your group of sample appear on the plot, click on export icon (top-right corner) and choose .csv
+- Scroll down in the exported file and change the name + ID other columns manually
+=> To be sure to refer to the good sample, I compared the pseudotime values displayed on the plot with the ones on the tables
+=> This is PCAplot_data.csv
+- Then click on "Progression" and do the same (export + manual changes)-
+=> This is pseudotime_plot_data
+
+# PCA plot
+
+```{r loading objects}
+
+#### Load the mean pseudobulked logcounts table
+###############################################
+
+PCa_metadata <- readr::read_csv("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/PDOX_vs_PDOXO/exp/All_P20-11_P20-23_MSK/pseudobulking/PCAplot_data.csv", col_names = T)
+pseudotime_metadata <- readr::read_csv("/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Prostate/PDOX_vs_PDOXO/exp/All_P20-11_P20-23_MSK/pseudobulking/pseudotime_plot_data.csv", col_names = T)
+
+```
+
+```{r PCA plot with grouped samples names}
+
+
+palette_PCA = c("NORMAL" = "#25681E", 
+                "PRIMARY"= "#F63A21",
+                "ARPC" = "#4889C7", 
+                "DNPC" = "#1010C0",
+                "NEPC" = "#93355A", # Corresponds to ("NORMAL", "PRIMARY", "ARPC", "DNPC", "NEPC"
+                ########### P20.11 ####################
+                "P20-11_MouseB_P1_Tumor"= "#8B0000FF",    # Dark Red
+                "P20-11_MouseB_P1_Org"= "#CC5151FF",      # Indian Red
+                "P20-11_MouseB_P3_Org" = "#E57E7EFF",     # Dark Orange
+                "P20-11_MouseA_P3_Org" = "#99540FFF",     # Orange Red
+                "P20-11_P1_d3_PDOrg"= "#FFC44CFF",        # Sandy Brown
+                "P20-11_P1_d21_PDOrg"= "#FF7F0EFF",       # Chocolate
+                
+                ########### P20.23 ####################
+                "P20-23_MouseA_P1_Tumor"= "#00008BFF",    # Dark Blue
+                "P20-23_MouseA_P1_Org"  = "#4169E1FF",    # Royal Blue
+                "P20-23_MouseA_P3_Tumor" = "#0F6B99FF",   # Slate Blue
+                "P20-23_MouseA_P3_Org"= "#7EC3E5FF",      # Light Blue
+                "P20-23_MouseA_P9_Org" = "#9370DBFF",  
+                ########### MSK ####################
+                "MSK-PCa2_P9_PDOrg" = "#005000FF" ) 
+
+
+
+# Ensure that PCa_metadata$name is a factor
+PCa_metadata$name <- as.factor(PCa_metadata$name)
+
+PCA_profiler_samples = c("NORMAL", "PRIMARY" , "ARPC" , "DNPC",  "NEPC")
+
+# Create subsets for the current samples phase and "Other" samples
+PCa_metadata_background <- subset(PCa_metadata, name %in% PCA_profiler_samples)
+PCa_metadata_highlight <- subset(PCa_metadata, !(name %in% PCA_profiler_samples))
+
+# Define the plot
+plot <- ggplot() +
+  # Plot "Other" category points first
+  geom_point(
+    data = PCa_metadata_background, 
+    aes(x = x, y = y, fill = name), alpha = 0.5, size = 2, shape = 21, stroke = 0.2) +  # For zoomed plot
+  # aes(x = x, y = y, fill = name), alpha = 0.5, size = 4, shape = 21, stroke = 0.2) + # Normal plot
+  # Plot current cell cycle phase points on top
+  geom_point(
+    data = PCa_metadata_highlight, 
+    aes(x = x, y = y, fill = name), alpha = 1, size = 6,  shape = 21, stroke = 0.2) + # For zoomed plot
+  # aes(x = x, y = y, fill = name), alpha = 1, size = 4,  shape = 21, stroke = 0.2) # Normal plot
+  
+  # Manual scale
+  scale_fill_manual(values = alpha(palette_PCA, 0.5)) +
+  # theme_classic() + # Normal plot
+  theme_void() + # For zoomed plot
+  labs(x = "PCA_1",
+       y = "PCA_2") +
+  guides(
+    alpha = "none",
+    fill = "none",
+    # fill = guide_legend(title = "Description"),  # Ensure the fill legend is included
+    size = "none"
+  )
+
+# Save the plot
+ggsave(
+  plot = plot,
+  filename = paste0(out_path, time_stamp(), "PCaProfiler_PCA_plot.pdf"),
+  device = "pdf",
+  width = 4,
+  height = 4
+)
+
+##
+
+# Set the desired zoom region
+x_zoom_start <- 60
+x_zoom_end <- 85
+y_zoom_start <- -35
+y_zoom_end <- 0
+
+# Create the zoomed plot
+zoomed_simplified <- plot +
+  xlim(x_zoom_start, x_zoom_end) +
+  ylim(y_zoom_start, y_zoom_end) 
+
+
+# Display the plot
+zoomed_simplified
+
+ggsave(
+  plot = zoomed_simplified,
+  filename = paste0(out_path,time_stamp(),"PCaProfiler_PCA_zoomed.pdf"),
+  device = "pdf",
+  width = 4,
+  height = 4
+)
+
+# Extract the legend
+legend = cowplot::get_legend(plot = plot)
+
+# Create a new plot for the legend
+legend_plot = cowplot::ggdraw(legend)
+
+# Save the legend separately
+ggsave(
+  plot = legend_plot,
+  filename = paste0(out_path, time_stamp(), "PCaProfiler_PCA_legend.pdf"),
+  width = 3,  # Adjust width as needed
+  height = 3,  # Adjust height as needed
+  device = "pdf"
+)
+
+
+```
+
+
+
+# Pseudotime plot
+
+```{r}
+
+
+# Ensure that pseudotime_metadata$name is a factor
+pseudotime_metadata$name <- as.factor(pseudotime_metadata$name)
+
+# Ensure that pseudotime_metadata$y is a factor with the specified order
+pseudotime_metadata$y <- factor(
+  pseudotime_metadata$y, 
+  levels = rev(c("NORMAL", "PRIMARY", "ARPC", "NEPC", "DNPC", "In_House_Models", "MSK_PDOs",
+                 "LNCAP","PNPCa","LuCaP-23","LuCaP-35","LuCaP-78","LuCaP-145","LuCaP-147"))
+  
+)
+
+# Create subsets for the current samples phase and "Other" samples
+pseudotime_metadata_background <- subset(pseudotime_metadata, name %in% PCA_profiler_samples)
+pseudotime_metadata_highlight <- subset(pseudotime_metadata, !(name %in% PCA_profiler_samples))
+
+# Define the plot
+plot <- ggplot() +
+  # Plot "Other" category points first
+  # Plot current cell cycle phase points on top
+  ggrastr::rasterise(
+    geom_point(
+      data = pseudotime_metadata_highlight, 
+      aes(x = x, y = y, fill = name), alpha = 0.6, size = 4, 
+      shape = 21
+    ), 
+    dpi = 100, scale = 1
+  ) +
+  ggrastr::rasterise(
+    geom_point(
+      data = pseudotime_metadata_background, 
+      aes(x = x, y = y, fill = name), alpha = 0.6, size = 4, 
+      shape = 21
+    ), 
+    dpi = 100, scale = 1
+  ) +
+  # Manual scales
+  scale_fill_manual(values = palette_PCA) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_text(size = 14),  # Change x-axis title size
+    axis.title.y = element_text(size = 14),  # Change y-axis title size
+    axis.text.x = element_text(size = 12),   # Change x-axis tick label size
+    axis.text.y = element_text(size = 12)    # Change y-axis tick label size
+  ) +
+  guides(
+    alpha = "none",
+    fill = "none",
+    size = "none"
+  )
+
+# Save the plot
+ggsave(
+  plot = plot,
+  filename = paste0(out_path, time_stamp(), "plots_PCaProfiler_Pseudotime_plot.pdf"),
+  device = "pdf",
+  width = 6,
+  height = 6
+)
+
+```
+
+

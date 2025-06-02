@@ -1,0 +1,511 @@
+---
+title: '7bis.Chen 2021 (Tumor Tissue, epithelial cells only): signature score'
+author: "Romuald Parmentier"
+date: "2024-10-29"
+output: html_document
+---
+
+```{r Load libraries and create output folder, message = F}
+
+# Libraries
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+
+# Functions and palettes
+source(paste0(github_dir, "/Dolgos_Custom_Functions.R"))
+source(paste0(github_dir, "/Dolgos_Custom_Color_Palettes.R"))
+
+# Create output path
+out_path = create_exp_folder(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  exp = "7bis_signature_score"
+)
+
+```
+
+# Prepare the data
+
+```{r Load the files}
+
+# Load sce after nornalization (no rescaling)
+file_path = get_exp_file_path(
+  github_dir = github_dir,
+  samples_ID = "Chen_Tissue",
+  prev_exp = "6bis_clustering_tumor_cells", 
+  pattern = "sce_comb_clustered.rds") # Sce after batch correction for visuaoization
+
+sce_comb = readRDS(file = file_path)
+
+```
+
+```{r Transform sce to Seurat object}
+
+seurat_comb = as.Seurat(
+  x = sce_comb, 
+  counts = "counts", 
+  data = "logcounts"
+)
+
+# Set the originalexp (aka "RNA" as the default assay)
+DefaultAssay(seurat_comb) = "originalexp"
+
+# Adds scale.data slot
+seurat_comb = ScaleData(seurat_comb)
+
+```
+
+# Perform signature score
+
+```{r Other prostate cancer signatures = Supp.Fig4.A}
+
+# Define the list of panels
+panels = c("C2" = "LIU_PROSTATE_CANCER_UP",
+           "C2" = "LIU_PROSTATE_CANCER_DN",
+           "C2" = "TOMLINS_PROSTATE_CANCER_UP", 
+           "C2" = "TOMLINS_PROSTATE_CANCER_DN",
+           "C2" = "WALLACE_PROSTATE_CANCER_UP", 
+           "C2" = "WALLACE_PROSTATE_CANCER_DN",
+           "H" = "HALLMARK_ANDROGEN_RESPONSE",
+           "C5" = "GOBP_KERATINOCYTE_DIFFERENTIATION")
+
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  # Make a table with all genes belonging to the signature of interest
+  gene_panel = get_signature_data(
+    pathway_proxy = panel_name, MSigDB_category = names(panel_name)
+  )
+  
+  # Calculate signature score and add it to Seurat object as an alternative assay
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = panel_name, 
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Transfer the signature score from Seurat to SCE object
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = panel_name,
+    seurat_assay = paste0(panel_name, "_score_only"),
+    signature_genes = gene_panel$SYMBOL
+  )
+  
+  # Calculate min and max signature score outliers for better visualization on UMAP
+  min_max_outliers = get_signature_score_outliers( 
+    sce_object = sce_comb,
+    sce_signature_column = paste0(panel_name, "_score"),
+    signature_name = panel_name,
+    nb_outliers = 1
+  )
+  
+}
+
+```
+
+# Visualizing signature scores
+
+```{r Make a tibble of metadata}
+
+# get metadata
+md <- as_tibble(colData(sce_comb))
+
+# get embeddings from 2 first PC
+coords <- as_tibble(reducedDim(sce_comb, "UMAP_on_MNN.1-20"))[,1:2]
+colnames(coords) = c("UMAP_1","UMAP_2")
+
+# combine dataframes
+md <- cbind(md, coords)
+
+```
+
+```{r Violin plot of signatures = Fig3.F / Supp.Fig4A / Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+panels = c( "LIU_PROSTATE_CANCER_UP_score",
+            "LIU_PROSTATE_CANCER_DN_score",
+            "TOMLINS_PROSTATE_CANCER_UP_score", 
+            "TOMLINS_PROSTATE_CANCER_DN_score",
+            "WALLACE_PROSTATE_CANCER_UP_score", 
+            "WALLACE_PROSTATE_CANCER_DN_score",
+            "HALLMARK_ANDROGEN_RESPONSE_score",
+            "GOBP_KERATINOCYTE_DIFFERENTIATION_score")
+
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  plot <- ggplot(md, aes(x = walktrap_30, y = .data[[panel_name]], fill = walktrap_30)) +
+    geom_violin(alpha = 0.8, position = position_dodge(width = 0.8), scale = "width") +
+    geom_boxplot(width = 0.1, position = position_dodge(width = 0.8), alpha = 0.5) +
+    scale_fill_manual(values = pal_walktrap_cluster, name = "walktrap_30") +
+    guides(fill = "none") +
+    theme_minimal() + 
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.title = element_text(size = 12),  # Customize axis title appearance
+      axis.text = element_text(size = 10),    # Customize axis text appearance
+      axis.line = element_line(size = 0.5),   # Customize axis line appearance
+      axis.ticks = element_line(size = 0.5)) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(
+      title = element_text(panel_name),
+      x = element_blank(),
+      y = "Signature score")
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plots_Violin_Scores_", panel_name,".pdf"),
+    device = "pdf",
+    width = 210,
+    height = 150,
+    units = "mm"
+  )
+  
+}
+
+```
+
+```{r Single UMAP colored with signature score = Supp.Fig4B / Supp.Fig7E}
+
+# Define the list of panels
+panels = c( "LIU_PROSTATE_CANCER_UP_score",
+            "HALLMARK_ANDROGEN_RESPONSE_score",
+            "GOBP_KERATINOCYTE_DIFFERENTIATION_score")
+
+# Iterate over each panel in the list
+for (panel_name in panels) {
+  
+  
+  plot <- ggplot() +
+    # Rasterise the first layer
+    ggrastr::rasterise(
+      geom_point(
+        data = md,
+        aes(x = UMAP_1, y = UMAP_2, fill = .data[[panel_name]]), 
+        alpha = 0.7, size = 1.3, 
+        shape = 21,
+        color = "gray10",
+        stroke = 0.2),  # Lighter stroke color (adjust as needed)),# Ensure shape supports fill and color
+      dpi = 300, scale = 1) +
+    # Create a continuous gradient for the fill color
+    scale_fill_gradientn(colors = c("lightgrey", "lightgrey", "#FF7078FF", "#69000CFF"),  # Grey to red gradient
+                         values = scales::rescale(c(-0.15,0.20, 0.35, 1))) +
+    theme_classic() + # Set limits
+    labs(title = panel_name,
+         fill = "Score") +  # Change the legend title
+    guides(
+      alpha = "none",
+      size = "none"
+    )
+  
+  ggsave(
+    plot = plot,
+    filename = paste0(out_path,time_stamp(),"plot_UMAP_", panel_name, ".pdf"),
+    device = "pdf",
+    width = 10,
+    height = 8,
+  )
+  
+}
+
+```
+
+# Assign cells an identity according tumor up signatures
+
+```{r}
+
+sce_comb$broad_type = ifelse(
+  test = sce_comb$walktrap_10 %in% c(7,11,14),
+  yes = "Healthy epithelial cells",
+  no = "Luminal tumor cells")
+
+plotExpression(
+  object = sce_comb, 
+  x = "walktrap_10",
+  features = c("KRT19","KRT14","KRT17","KRT16","KLK3","AMACR","AR","S100A6","KLK2","FOLH1","CP","MMP7","PCA3"), 
+  color_by = "walktrap_10" )
+
+```
+
+
+# Tests for Dimitrios Signature
+
+```{r Add signature score to sce object}
+
+# Custom gene sets file
+custom_gene_sets = read.csv2(
+  file = "/scicore/home/wykopa75/GROUP/rparmentier/sc_RNAseq/Projects/Sequencing_Data/Gene_sets/New_New_Gene_List_Dimitrios.csv",
+  header = T)
+
+
+for(gene_set in unique(custom_gene_sets$Gene_set_name)){
+  
+  print(paste0("Adding signature score for: ", gene_set))
+  
+  # Select genes on which calculating the signature score
+  genes_of_interest <- custom_gene_sets %>% filter(Gene_set_name == gene_set)
+  genes_of_interest = as.vector(genes_of_interest$Genes)
+  
+  # Calculate signature score and add it to seurat object as an alternative assays (signature only + signature genes only)
+  seurat_comb = calculate_signature_score(
+    assay_name = "originalexp",
+    seurat_object = seurat_comb, 
+    signature_name = gene_set, 
+    signature_genes = genes_of_interest
+  )
+  
+  # Transfer the signature score from seurat to sce (score in colData, genes of the signature marked in the rowData)
+  sce_comb = add_signature_score_to_sce(
+    sce_object = sce_comb,
+    seurat_object = seurat_comb,
+    signature_name = gene_set,
+    seurat_assay = paste0(gene_set, "_score_only"),
+    signature_genes = genes_of_interest
+  )
+  
+}
+
+
+```
+
+## Visualize it
+
+```{r Export all metadata into a dataframe}
+
+md = colData(sce_comb)
+md = as_data_frame(md)
+md = md[,-which(colnames(md) %in% c("scDblFinder.cxds_score", "scDblFinder.score"))]
+md_long = pivot_longer(data = md,cols = contains("_score"),names_to = "score_name", values_to = "score_values")
+
+gene_signature_scores = colnames(md)[which(grepl(x = colnames(md), pattern = "score"))]
+
+```
+
+# Split and colored by cell type (healthy vs tumor)
+
+## Violin plots
+
+```{r Stats }
+
+# To perform wilcoxon data should be simitrically distributed arround the median (~ok here)
+ggdensity(data = md_long, x = "score_values", rug = TRUE, fill = "lightgray") +
+  stat_central_tendency(type = "median", color = "red", linetype = "dashed") +
+  facet_wrap(
+    ~score_name,
+    scales = "free")  
+
+# Perfroem wilcoxon test of each score independently amon broad types
+wilcoxon_test_df <- md_long %>%
+  group_by(score_name) %>%
+  wilcox_test(score_values ~ broad_type) %>%
+  add_significance()
+
+```
+
+```{r Violin plots }
+
+plot_list = list()
+
+for(gene_signature in gene_signature_scores){
+  
+  md_plot = md_long %>%
+    dplyr::filter(score_name == gene_signature)
+  
+  md_plot$broad_type = factor(md_plot$broad_type,levels = c("Healthy epithelial cells", "Luminal tumor cells"))
+  
+  stat_plot = wilcoxon_test_df %>%
+    dplyr::filter(score_name == gene_signature)
+  
+  # Compute dynamic y-position for p-values
+  y_max <- max(md_plot$score_values, na.rm = TRUE)
+  y_positions <- seq(y_max * 1.05, y_max * 1.15, length.out = nrow(stat_plot))  # Adjusted range
+  
+  # Careful, to be able to add a rstatix layer on the plots, we need to use at leat on layer of ggpubr plot (like ggboxplot or ggviolin)
+  plot = ggviolin( 
+    data = md_plot, 
+    x = "broad_type", 
+    y = "score_values", 
+    fill = "broad_type",
+    trim = TRUE,        
+    scale = "width",    
+    width = 0.6   
+  ) + 
+    stat_pvalue_manual(stat_plot, label = "p.signif", y.position = y_positions,tip.length = 0) +
+    geom_boxplot(
+      data = md_plot,
+      aes(x = broad_type, y = score_values, fill = broad_type),  
+      width = 0.1,  
+      position = position_dodge(0.5),
+      outlier.shape = NA,
+      color = "black"
+    ) +
+    scale_fill_manual(values = c("Healthy epithelial cells" = "pink", 
+                                 "Luminal tumor cells" = "darkred")) +  
+    labs(
+      title = paste0("Signature score:", gene_signature),
+      x = "Sample",
+      y = "log2(UMI)",
+      fill = "Data Type"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+      strip.text = element_text(size = 12)
+    ) +
+    guides(fill = "none")
+  plot_list[[gene_signature]] = plot
+  
+}
+
+multiple_page_layout <- gridExtra::marrangeGrob(
+  grobs = plot_list, 
+  nrow = 1, ncol = 1)
+
+ggsave(
+  plot = multiple_page_layout,
+  filename = paste0(out_path,time_stamp(),"plots_violin_facetted_per_broad_type.pdf"),
+  device = "pdf",
+  width = 12,
+  height = 8)
+
+```
+
+## Heatmap
+
+```{r}
+
+  gene_list = unique(custom_gene_sets$Genes) %>%
+    dplyr::filter(Gene_set_name == gene_set)
+  
+  gene_list = as.vector(gene_list$Genes)
+  gene_list = sapply(X = gene_list,FUN = function(x){check_aliase(sce = sce_comb, gene = x)})
+  gene_list = gene_list[which(gene_list %in% rownames(sce_comb))]
+  
+  # Extract normalized expression data
+  expression_data <- assay(sce_comb[gene_list,], "logcounts")
+  expression_data_scaled = t(scale(t(expression_data)))
+  
+  # Add the identity group column
+  meta_data <- colData(sce_comb)
+  meta_data = as_tibble(meta_data) 
+  
+  # Get the column order based on sorted broad_type
+  sorted_indices <- order(meta_data$broad_type)
+  
+  meta_data = meta_data[sorted_indices,]
+  expression_data_scaled = expression_data_scaled[,sorted_indices]
+  
+  # Sample from each broad_type group
+  sampled_indices <- meta_data %>%
+    group_by(broad_type) %>%
+    mutate(row_number = row_number()) %>%
+    sample_n(min(n(), 500)) 
+  
+  # Subset the expression matrix and metadata
+  meta_data_downsampled <- meta_data[sampled_indices$row_number, ]
+  expression_data_scaled_downsampled <- expression_data_scaled[, sampled_indices$row_number]
+  
+
+
+```
+
+```{r Define color scale for z-score scaled data}
+
+# Define a custom color scale centered on 0
+max_value <- max(expression_data, na.rm = TRUE)  # Find the max value in the matrix
+min_value <- min(expression_data, na.rm = TRUE)  # Find the min value in the matrix
+breakpoints <- c(min_value, 0, max_value)                   # Define breakpoints for the color scale
+color_function <- colorRamp2::colorRamp2(breakpoints, c("#26456EFF", "lightgrey", "#9C0824FF"))
+
+colors_vector <- c(
+  "#26456EFF", "#244C7CFF", "#21538BFF", "#1C5A99FF", "#1C63A1FF", "#1C6CAAFF", "#1F74B1FF", 
+  "#2B7BB4FF", "#3482B6FF", "#3F8BBAFF", "#4F98C4FF", "#5EA5CEFF", "#78B1D3FF",
+  "#9CBBCFFF", "#FFFFFF", "#D6BFBBFF", "#E9A79DFF", "#F78E80FF", "#F6796AFF", 
+  "#EC6857FF", "#E25644FF", "#DC4636FF", "#D73529FF", "#D21E1CFF", "#CB1618FF", 
+  "#C51517FF", "#BE1316FF", "#B3101BFF", "#A70C20FF", "#9C0824FF"
+)
+
+
+# Step 1: Define the number of colors in your color vector
+num_colors <- length(colors_vector)
+
+# Step 2: Calculate breakpoints
+# Ensure the white color is at the midpoint (0)
+mid_index <- ceiling(num_colors / 2)  # Index of the white color
+
+breakpoints <- c(
+  seq(min_value, 0, length.out = mid_index),
+  seq(0, max_value, length.out = num_colors - mid_index + 1)[-1]  # Avoid duplicating 0
+)
+
+color_function <- colorRamp2::colorRamp2(breakpoints, colors_vector)
+
+```
+
+```{r Draw TPM heatmap}
+
+for(gene_set in unique(custom_gene_sets$Gene_set_name)){
+
+
+{
+  
+  heatmap_anno = HeatmapAnnotation(
+    broad_type = factor(meta_data_downsampled$broad_type, levels = unique(meta_data_downsampled$broad_type)), # Has to be a factor
+    col = list(
+      broad_type = c("Healthy epithelial cells" = "pink", "Luminal tumor cells" = "darkred")),
+    show_legend = c(Clusters = F, Conditions = F), 
+    show_annotation_name = T)
+  
+  pdf_file_name <- paste0(out_path, time_stamp(), "plot_Heatmap_focus_Scaled.pdf")
+  
+  # Open PDF device
+  pdf(file = pdf_file_name, width = 8, height = 8)
+  
+  # Generate heatmap
+  print(Heatmap(
+    top_annotation = heatmap_anno,
+    matrix = expression_data_scaled_downsampled, 
+    cluster_column_slices = FALSE,
+    cluster_rows = FALSE,
+    cluster_columns = F,
+    show_column_dend = FALSE,
+    show_column_names = F,
+    show_row_dend = FALSE,
+    column_split = meta_data_downsampled$broad_type,
+    use_raster = TRUE,
+    col = color_function, # Use custom color scale
+    row_names_gp = grid::gpar(fontsize = 5),
+    heatmap_legend_param = list(title = "TPM"),
+    column_title_rot = 45
+  ))
+  
+  dev.off()
+  
+}
+
+```
+
+
+# Export files
+
+```{r Export sce object with signature scores }
+
+# Clustering takes a lot of time, better to export sce object here
+
+saveRDS(
+  object = sce_comb,
+  file = paste0(out_path,time_stamp(),"sce_comb_signature_score.rds")
+)
+
+```
